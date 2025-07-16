@@ -411,8 +411,8 @@ function createMatches() {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 It's Over Dating Game Server running on port ${PORT}`);
-  console.log(`📊 Admin Dashboard: http://localhost:${PORT}/admin`);
-  console.log(`💕 User Interface: http://localhost:${PORT}`);
+  console.log(`📊 Admin Dashboard: https://google-8j5x.onrender.com/admin`);
+  console.log(`💖 User Interface: https://google-8j5x.onrender.com`);
 });
 
 // Graceful shutdown
