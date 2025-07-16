@@ -197,7 +197,8 @@ app.post('/api/admin/register', async (req, res) => {
     // Check if admin already exists
     db.get('SELECT * FROM admins WHERE email = ? OR username = ?', [email, username], async (err, admin) => {
       if (err) {
-        return res.status(500).json({ error: 'Database error' });
+        console.error('DB error during admin registration:', err);
+        return res.status(500).json({ error: 'Database error', details: err.message });
       }
       if (admin) {
         return res.status(400).json({ error: 'Admin with this email or username already exists' });
@@ -208,7 +209,8 @@ app.post('/api/admin/register', async (req, res) => {
         [username, email, hashedPassword],
         function(err) {
           if (err) {
-            return res.status(500).json({ error: 'Registration failed' });
+            console.error('DB error during admin registration (insert):', err);
+            return res.status(500).json({ error: 'Registration failed', details: err.message });
           }
           res.json({ 
             success: true,
@@ -218,7 +220,8 @@ app.post('/api/admin/register', async (req, res) => {
       );
     });
   } catch (error) {
-    res.status(500).json({ error: 'Server error' });
+    console.error('Server error during admin registration:', error);
+    res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
 
@@ -284,10 +287,11 @@ app.post('/api/admin/create-user', verifyAdminToken, async (req, res) => {
       password: hashedPassword
     }, (err, userId) => {
       if (err) {
+        console.error('DB error during user creation:', err);
         if (err.message && err.message.includes('UNIQUE')) {
-          return res.status(400).json({ error: 'User ID or email already exists' });
+          return res.status(400).json({ error: 'User ID or email already exists', details: err.message });
         }
-        return res.status(400).json({ error: 'User registration failed' });
+        return res.status(400).json({ error: 'User registration failed', details: err.message });
       }
       res.json({
         success: true,
@@ -295,7 +299,8 @@ app.post('/api/admin/create-user', verifyAdminToken, async (req, res) => {
       });
     });
   } catch (error) {
-    res.status(500).json({ error: 'Server error' });
+    console.error('Server error during user creation:', error);
+    res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
 
