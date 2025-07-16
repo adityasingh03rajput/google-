@@ -37,6 +37,9 @@ const MILESTONE_REWARDS = {
 };
 const STICKER_COST = 3; // coins required to send a sticker
 
+// Track the latest message for seen status
+let latestMessage = null;
+
 function checkMilestones(username, type) {
   const stats = userStats[username];
   if (!stats) return;
@@ -144,7 +147,7 @@ wss.on('connection', (ws) => {
         userStats[username] = userStats[username] || {
           messages: 0,
           stickers: 0,
-          coins: 0,
+          coins: 50, // Initial balance
           joinTime: joinTimestamp
         };
         broadcast('user-joined', { username });
@@ -155,11 +158,14 @@ wss.on('connection', (ws) => {
           userStats[username].messages += 1;
           checkMilestones(username, 'messages');
         }
-        broadcast('text-message', {
+        const msgObj = {
           username,
           message: data.message,
-          timestamp: new Date().toISOString()
-        });
+          timestamp: new Date().toISOString(),
+          id: Date.now() + Math.random().toString(36).slice(2) // unique id
+        };
+        latestMessage = msgObj;
+        broadcast('text-message', msgObj);
         sendCoinUpdate(username, ws);
       } else if (data.type === 'sticker-message') {
         if (username && userStats[username]) {
@@ -195,6 +201,23 @@ wss.on('connection', (ws) => {
           }
         );
         sendCoinUpdate(username, ws);
+      } else if (data.type === 'seen-message') {
+        // data: { type: 'seen-message', messageId }
+        if (latestMessage && data.messageId === latestMessage.id && username !== latestMessage.username) {
+          // Notify the sender only
+          wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              // Find the username for this client
+              let clientName = null;
+              for (const port in users) {
+                if (client._socket.remotePort == port) clientName = users[port];
+              }
+              if (clientName === latestMessage.username) {
+                client.send(JSON.stringify({ type: 'message-seen', messageId: latestMessage.id, seenBy: username }));
+              }
+            }
+          });
+        }
       } else if (data.type === 'request-user-list') {
         sendUserList();
       } else if (data.type === 'request-coin-balance') {
