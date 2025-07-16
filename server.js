@@ -1,29 +1,12 @@
 require('dotenv').config();
-const express = require('express');
 const http = require('http');
-const socketIo = require('socket.io');
-const { PythonShell } = require('python-shell');
 const path = require('path');
+const express = require('express');
+const { PythonShell } = require('python-shell');
+const WebSocket = require('ws');
 
 const app = express();
-
-// Add CORS middleware for API endpoints
-const cors = require('cors');
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST']
-}));
-
 const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: '*',
-    methods: ["GET", "POST"]
-  }
-});
-
-// Store connected users
-const users = {};
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
@@ -33,68 +16,79 @@ app.get('/api/status', (req, res) => {
   res.json({ status: 'Server is running', users: Object.keys(users).length });
 });
 
-// Socket.io connection
-io.on('connection', (socket) => {
-  console.log('New user connected:', socket.id);
+// WebSocket server
+const wss = new WebSocket.Server({ server });
 
-  // Send user list to a specific socket
-  function sendUserList() {
-    io.emit('user-list', Object.values(users));
-  }
+// Store connected users
+const users = {};
 
-  // Handle user list request
-  socket.on('request-user-list', () => {
-    sendUserList();
+function broadcast(type, data) {
+  const message = JSON.stringify({ type, ...data });
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
   });
+}
 
-  // Handle new user joining
-  socket.on('join', (username) => {
-    users[socket.id] = username;
-    io.emit('user-joined', username);
-    sendUserList();
-  });
+function sendUserList() {
+  const userList = Object.values(users);
+  broadcast('user-list', { users: userList });
+}
 
-  // Handle text messages
-  socket.on('text-message', (message) => {
-    const username = users[socket.id];
-    io.emit('text-message', { username, message, timestamp: new Date().toISOString() });
-  });
+wss.on('connection', (ws) => {
+  let username = null;
 
-  // Handle sticker messages
-  socket.on('sticker-message', (stickerId) => {
-    const username = users[socket.id];
-    
-    // Process with Python (optional)
-    PythonShell.run(
-      path.join(__dirname, 'sticker_processor.py'),
-      {
-        mode: 'text',
-        pythonOptions: ['-u'],
-        args: [stickerId, username]
-      },
-      (err, results) => {
-        if (err) {
-          console.error("Python error:", err);
-          io.emit('sticker-message', { 
-            username, 
-            stickerId,
-            stickerCode: '❓', // Fallback sticker
-            timestamp: new Date().toISOString()
-          });
-        } else {
-          const stickerData = JSON.parse(results[0]);
-          io.emit('sticker-message', stickerData);
-        }
+  ws.on('message', (msg) => {
+    try {
+      const data = JSON.parse(msg);
+      if (data.type === 'join') {
+        username = data.username;
+        users[ws._socket.remotePort] = username;
+        broadcast('user-joined', { username });
+        sendUserList();
+      } else if (data.type === 'text-message') {
+        broadcast('text-message', {
+          username,
+          message: data.message,
+          timestamp: new Date().toISOString()
+        });
+      } else if (data.type === 'sticker-message') {
+        // Process with Python
+        PythonShell.run(
+          path.join(__dirname, 'sticker_processor.py'),
+          {
+            mode: 'text',
+            pythonOptions: ['-u'],
+            args: [data.stickerId, username]
+          },
+          (err, results) => {
+            if (err) {
+              broadcast('sticker-message', {
+                username,
+                stickerId: data.stickerId,
+                stickerCode: '❓',
+                timestamp: new Date().toISOString()
+              });
+            } else {
+              const stickerData = JSON.parse(results[0]);
+              broadcast('sticker-message', stickerData);
+            }
+          }
+        );
+      } else if (data.type === 'request-user-list') {
+        sendUserList();
       }
-    );
+    } catch (err) {
+      console.error('Message error:', err.message);
+    }
   });
 
-  // Handle disconnection
-  socket.on('disconnect', () => {
-    const username = users[socket.id];
+  ws.on('close', () => {
     if (username) {
-      delete users[socket.id];
-      io.emit('user-left', username);
+      broadcast('user-left', { username });
+      // Remove user by port
+      delete users[ws._socket.remotePort];
       sendUserList();
     }
   });
@@ -102,5 +96,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Server running at ${process.env.SERVER_URL || `http://localhost:${PORT}`}`);
+  console.log(`Server running at http://localhost:${PORT}`);
 });
