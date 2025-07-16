@@ -3,7 +3,8 @@ const path = require('path');
 
 class Database {
   constructor() {
-    this.db = new sqlite3.Database(path.join(__dirname, 'dating_game.db'));
+    // Use absolute path for database file
+    this.db = new sqlite3.Database(path.resolve(__dirname, 'dating_game.db'));
     this.init();
   }
 
@@ -27,6 +28,17 @@ class Database {
         group_type TEXT DEFAULT 'normal',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         last_active DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Admins table
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS admins (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE,
+        email TEXT UNIQUE,
+        password TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -264,6 +276,7 @@ class Database {
     `, callback);
   }
 
+  // For graceful shutdown
   close() {
     this.db.close();
   }
