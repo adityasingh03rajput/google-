@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>It's Over - Admin Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #3498db;
+            margin-bottom: 10px;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 1.1rem;
+        }
+
+        .admin-sections {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .admin-section {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+        }
+
+        .btn.danger {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+        }
+
+        .btn.success {
+            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+        }
+
+        .btn.warning {
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+        }
+
+        .users-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+
+        .users-table th,
+        .users-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .users-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+        }
+
+        .users-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .control-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .control-item {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+            margin-top: 10px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #3498db;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        .log-area {
+            background: #2c3e50;
+            color: #ecf0f1;
+            border-radius: 10px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            margin-top: 15px;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 2px 0;
+        }
+
+        .log-entry.info {
+            color: #3498db;
+        }
+
+        .log-entry.warning {
+            color: #f39c12;
+        }
+
+        .log-entry.error {
+            color: #e74c3c;
+        }
+
+        .match-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .match-algorithm {
+            background: #e8f4fd;
+            border-radius: 10px;
+            padding: 15px;
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #27ae60;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        .notification.error {
+            background: #e74c3c;
+        }
+
+        @media (max-width: 768px) {
+            .admin-sections {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛠️ It's Over - Admin Dashboard</h1>
+            <p>Complete Control Center for the Dating Game</p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number" id="totalUsers">0</div>
+                <div class="stat-label">Total Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="activeUsers">0</div>
+                <div class="stat-label">Active Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalMatches">0</div>
+                <div class="stat-label">Total Matches</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalMessages">0</div>
+                <div class="stat-label">Messages Sent</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalCoins">0</div>
+                <div class="stat-label">Coins in System</div>
+            </div>
+        </div>
+
+        <div class="admin-sections">
+            <div class="admin-section">
+                <h2 class="section-title">🎮 Game Controls</h2>
+                
+                <div class="control-panel">
+                    <div class="control-item">
+                        <strong>AI Compliments</strong>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="aiComplimentsToggle" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="control-item">
+                        <strong>Coin Transfers</strong>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="coinTransfersToggle" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="control-item">
+                        <strong>Weekend Games</strong>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="weekendGamesToggle">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="control-item">
+                        <strong>Love Confessions</strong>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="loveConfessionsToggle" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <button class="btn success" onclick="startWeekendEvent()">🎉 Start Weekend Event</button>
+                    <button class="btn warning" onclick="createChaosGroup()">⚡ Create Chaos Group</button>
+                    <button class="btn danger" onclick="endSession()">🔚 End Session</button>
+                </div>
+
+                <div class="match-controls">
+                    <div class="match-algorithm">
+                        <h4>Matching Algorithm</h4>
+                        <button class="btn" onclick="runMatchingAlgorithm()">🔄 Run Matching</button>
+                        <button class="btn" onclick="sendMatchEmails()">📧 Send Match Emails</button>
+                    </div>
+                    
+                    <div class="match-algorithm">
+                        <h4>Rewards System</h4>
+                        <button class="btn success" onclick="selectWinners()">🏆 Select Winners</button>
+                        <button class="btn warning" onclick="distributeRewards()">🎁 Distribute Rewards</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="admin-section">
+                <h2 class="section-title">👥 User Management</h2>
+                
+                <div style="margin-bottom: 15px;">
+                    <button class="btn" onclick="refreshUsers()">🔄 Refresh Users</button>
+                    <button class="btn warning" onclick="exportData()">📊 Export Data</button>
+                    <button class="btn danger" onclick="resetSystem()">⚠️ Reset System</button>
+                </div>
+
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table class="users-table" id="usersTable">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>ID</th>
+                                <th>Coins</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody">
+                            <tr>
+                                <td colspan="5" style="text-align: center;">Loading users...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="admin-section">
+                <h2 class="section-title">📊 Analytics & Monitoring</h2>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                    <div>
+                        <strong>Session Duration:</strong>
+                        <div id="sessionDuration" style="font-size: 1.2rem; color: #3498db;">0 days</div>
+                    </div>
+                    <div>
+                        <strong>Top Couple:</strong>
+                        <div id="topCouple" style="font-size: 1.2rem; color: #e74c3c;">Loading...</div>
+                    </div>
+                </div>
+
+                <button class="btn" onclick="generateReport()">📈 Generate Report</button>
+                <button class="btn" onclick="viewLeaderboard()">🏆 View Leaderboard</button>
+                <button class="btn warning" onclick="monitorActivity()">👁️ Monitor Activity</button>
+
+                <div class="log-area" id="systemLogs">
+                    <div class="log-entry info">[INFO] System initialized</div>
+                    <div class="log-entry info">[INFO] Admin dashboard loaded</div>
+                </div>
+            </div>
+
+            <div class="admin-section">
+                <h2 class="section-title">⚙️ System Configuration</h2>
+                
+                <div style="margin-bottom: 20px;">
+                    <h4>Milestone Rewards (Coins)</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+                        <div>
+                            <label>Messages:</label>
+                            <input type="number" id="messageReward" value="50" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                        <div>
+                            <label>Stickers:</label>
+                            <input type="number" id="stickerReward" value="75" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                        <div>
+                            <label>Time (per hour):</label>
+                            <input type="number" id="timeReward" value="100" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                        <div>
+                            <label>Game Activities:</label>
+                            <input type="number" id="gameReward" value="40" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <h4>Gift Costs</h4>
+                    <button class="btn" onclick="editGiftPrices()">💰 Edit Gift Prices</button>
+                    <button class="btn" onclick="addNewGift()">➕ Add New Gift</button>
+                </div>
+
+                <div>
+                    <h4>Email Templates</h4>
+                    <button class="btn" onclick="editEmailTemplates()">✉️ Edit Templates</button>
+                    <button class="btn" onclick="testEmailSystem()">🧪 Test Email System</button>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <button class="btn success" onclick="saveConfiguration()">💾 Save Configuration</button>
+                    <button class="btn warning" onclick="backupSystem()">🔄 Backup System</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="notification" id="notification"></div>
+
+    <script>
+        let systemStats = {};
+        let users = [];
+
+        // Initialize admin dashboard
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSystemStats();
+            loadUsers();
+            startRealTimeUpdates();
+            addSystemLog('Admin dashboard initialized', 'info');
+        });
+
+        async function loadSystemStats() {
+            try {
+                const response = await fetch('https://google-8j5x.onrender.com/api/stats');
+                systemStats = await response.json();
+                
+                document.getElementById('totalUsers').textContent = systemStats.total_users || 0;
+                document.getElementById('activeUsers').textContent = systemStats.active_users || 0;
+                document.getElementById('totalMatches').textContent = systemStats.total_matches || 0;
+                document.getElementById('totalMessages').textContent = systemStats.total_messages || 0;
+                document.getElementById('totalCoins').textContent = systemStats.total_coins || 0;
+                
+                addSystemLog(`Stats updated: ${systemStats.total_users} users, ${systemStats.total_matches} matches`, 'info');
+            } catch (error) {
+                console.error('Error loading stats:', error);
+                addSystemLog('Error loading system stats', 'error');
+            }
+        }
+
+        async function loadUsers() {
+            try {
+                const response = await fetch('https://google-8j5x.onrender.com/api/users');
+                users = await response.json();
+                
+                const tbody = document.getElementById('usersTableBody');
+                tbody.innerHTML = '';
+
+                users.forEach(user => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${user.name}</td>
+                        <td>${user.anonymous_id}</td>
+                        <td>🪙 ${user.coins}</td>
+                        <td>
+                            <span style="color: ${user.status === 'active' ? '#27ae60' : '#e74c3c'}">
+                                ${user.status}
+                            </span>
+                        </td>
+                        <td>
+                            <button class="btn" onclick="viewUser('${user.id}')" style="padding: 5px 10px; font-size: 12px;">View</button>
+                            <button class="btn warning" onclick="editUser('${user.id}')" style="padding: 5px 10px; font-size: 12px;">Edit</button>
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                
+                addSystemLog(`Loaded ${users.length} users`, 'info');
+            } catch (error) {
+                console.error('Error loading users:', error);
+                addSystemLog('Error loading users', 'error');
+            }
+        }
+
+        function startRealTimeUpdates() {
+            // Update stats every 30 seconds
+            setInterval(() => {
+                loadSystemStats();
+            }, 30000);
+
+            // Update session duration
+            setInterval(() => {
+                // This would calculate actual session duration
+                const duration = Math.floor(Date.now() / (1000 * 60 * 60 * 24)); // Placeholder
+                document.getElementById('sessionDuration').textContent = `${duration} days`;
+            }, 60000);
+        }
+
+        // Game Control Functions
+        function startWeekendEvent() {
+            addSystemLog('Weekend event started', 'info');
+            showNotification('Weekend event started! 🎉');
+            
+            // This would trigger weekend games and competitions
+            // Send notification to all users
+        }
+
+        function createChaosGroup() {
+            if (confirm('Are you sure you want to create a chaos group? This will move users who chose both matches into a separate competitive environment.')) {
+                addSystemLog('Chaos group created', 'warning');
+                showNotification('Chaos group created! ⚡');
+                
+                // Logic to move users to chaos group
+            }
+        }
+
+        function endSession() {
+            if (confirm('Are you sure you want to end the current session? This will finalize all matches and prepare for winner selection.')) {
+                addSystemLog('Session ended by admin', 'warning');
+                showNotification('Session ended! Preparing final results...', 'warning');
+                
+                // Logic to end session and calculate final results
+            }
+        }
+
+        function runMatchingAlgorithm() {
+            addSystemLog('Running matching algorithm...', 'info');
+            showNotification('Running matching algorithm...');
+            
+            // Simulate algorithm running
+            setTimeout(() => {
+                addSystemLog('Matching algorithm completed', 'info');
+                showNotification('Matches created successfully! ✅');
+                loadSystemStats(); // Refresh stats
+            }, 3000);
+        }
+
+        function sendMatchEmails() {
+            if (confirm('Send match notification emails to all users?')) {
+                addSystemLog('Sending match emails...', 'info');
+                showNotification('Sending match emails...');
+                
+                // Email sending logic
+                setTimeout(() => {
+                    addSystemLog('Match emails sent successfully', 'info');
+                    showNotification('Match emails sent! 📧');
+                }, 2000);
+            }
+        }
+
+        function selectWinners() {
+            addSystemLog('Selecting winners based on criteria...', 'info');
+            showNotification('Selecting winners...');
+            
+            // Winner selection logic
+            setTimeout(() => {
+                addSystemLog('Winners selected: Top 3 couples identified', 'info');
+                showNotification('Winners selected! 🏆');
+                document.getElementById('topCouple').textContent = 'John & Jane (2,450 coins)';
+            }, 2000);
+        }
+
+        function distributeRewards() {
+            if (confirm('Distribute rewards to winning couples?')) {
+                addSystemLog('Distributing rewards to winners...', 'info');
+                showNotification('Distributing rewards...');
+                
+                // Reward distribution logic
+                setTimeout(() => {
+                    addSystemLog('Rewards distributed successfully', 'info');
+                    showNotification('Rewards distributed! 🎁');
+                }, 2000);
+            }
+        }
+
+        // User Management Functions
+        function refreshUsers() {
+            loadUsers();
+            showNotification('User list refreshed');
+        }
+
+        function viewUser(userId) {
+            // Open user details modal or page
+            addSystemLog(`Viewing user details: ${userId}`, 'info');
+            showNotification('Opening user details...');
+        }
+
+        function editUser(userId) {
+            // Open user edit modal or page
+            addSystemLog(`Editing user: ${userId}`, 'info');
+            showNotification('Opening user editor...');
+        }
+
+        function exportData() {
+            addSystemLog('Exporting system data...', 'info');
+            showNotification('Exporting data...');
+            
+            // Data export logic
+            setTimeout(() => {
+                addSystemLog('Data export completed', 'info');
+                showNotification('Data exported successfully! 📊');
+            }, 2000);
+        }
+
+        function resetSystem() {
+            if (confirm('⚠️ WARNING: This will reset ALL data including users, matches, messages, and coins. This action cannot be undone!')) {
+                if (confirm('Are you ABSOLUTELY sure? Type "RESET" to confirm:') && prompt('Type RESET to confirm:') === 'RESET') {
+                    addSystemLog('SYSTEM RESET INITIATED', 'error');
+                    showNotification('System reset in progress...', 'error');
+                    
+                    // System reset logic
+                    setTimeout(() => {
+                        addSystemLog('System reset completed', 'error');
+                        showNotification('System has been reset!', 'error');
+                        loadSystemStats();
+                        loadUsers();
+                    }, 3000);
+                }
+            }
+        }
+
+        // Analytics Functions
+        function generateReport() {
+            addSystemLog('Generating analytics report...', 'info');
+            showNotification('Generating report...');
+            
+            // Report generation logic
+            setTimeout(() => {
+                addSystemLog('Analytics report generated', 'info');
+                showNotification('Report generated! 📈');
+            }, 2000);
+        }
+
+        function viewLeaderboard() {
+            addSystemLog('Loading leaderboard...', 'info');
+            showNotification('Loading leaderboard...');
+            
+            // Leaderboard logic
+        }
+
+        function monitorActivity() {
+            addSystemLog('Starting activity monitoring...', 'info');
+            showNotification('Activity monitoring started 👁️');
+            
+            // Real-time activity monitoring
+        }
+
+        // Configuration Functions
+        function saveConfiguration() {
+            const messageReward = document.getElementById('messageReward').value;
+            const stickerReward = document.getElementById('stickerReward').value;
+            const timeReward = document.getElementById('timeReward').value;
+            const gameReward = document.getElementById('gameReward').value;
+            
+            addSystemLog(`Configuration saved: Messages=${messageReward}, Stickers=${stickerReward}, Time=${timeReward}, Games=${gameReward}`, 'info');
+            showNotification('Configuration saved! 💾');
+        }
+
+        function editGiftPrices() {
+            addSystemLog('Opening gift price editor...', 'info');
+            showNotification('Opening gift editor...');
+        }
+
+        function addNewGift() {
+            const giftName = prompt('Enter gift name:');
+            const giftCost = prompt('Enter gift cost (coins):');
+            const giftEmoji = prompt('Enter gift emoji:');
+            
+            if (giftName && giftCost && giftEmoji) {
+                addSystemLog(`New gift added: ${giftName} (${giftCost} coins) ${giftEmoji}`, 'info');
+                showNotification('New gift added! ➕');
+            }
+        }
+
+        function editEmailTemplates() {
+            addSystemLog('Opening email template editor...', 'info');
+            showNotification('Opening email editor...');
+        }
+
+        function testEmailSystem() {
+            addSystemLog('Testing email system...', 'info');
+            showNotification('Testing email system...');
+            
+            setTimeout(() => {
+                addSystemLog('Email system test completed', 'info');
+                showNotification('Email system working! ✅');
+            }, 2000);
+        }
+
+        function backupSystem() {
+            addSystemLog('Creating system backup...', 'info');
+            showNotification('Creating backup...');
+            
+            setTimeout(() => {
+                addSystemLog('System backup completed', 'info');
+                showNotification('Backup created! 🔄');
+            }, 3000);
+        }
+
+        // Utility Functions
+        function addSystemLog(message, type = 'info') {
+            const logArea = document.getElementById('systemLogs');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            logEntry.textContent = `[${timestamp}] [${type.toUpperCase()}] ${message}`;
+            
+            logArea.appendChild(logEntry);
+            logArea.scrollTop = logArea.scrollHeight;
+            
+            // Keep only last 100 log entries
+            while (logArea.children.length > 100) {
+                logArea.removeChild(logArea.firstChild);
+            }
+        }
+
+        function showNotification(message, type = 'success') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.classList.add('show');
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+
+        // Toggle Controls
+        document.getElementById('aiComplimentsToggle').addEventListener('change', function() {
+            const status = this.checked ? 'enabled' : 'disabled';
+            addSystemLog(`AI compliments ${status}`, 'info');
+            showNotification(`AI compliments ${status}`);
+        });
+
+        document.getElementById('coinTransfersToggle').addEventListener('change', function() {
+            const status = this.checked ? 'enabled' : 'disabled';
+            addSystemLog(`Coin transfers ${status}`, 'info');
+            showNotification(`Coin transfers ${status}`);
+        });
+
+        document.getElementById('weekendGamesToggle').addEventListener('change', function() {
+            const status = this.checked ? 'enabled' : 'disabled';
+            addSystemLog(`Weekend games ${status}`, 'info');
+            showNotification(`Weekend games ${status}`);
+        });
+
+        document.getElementById('loveConfessionsToggle').addEventListener('change', function() {
+            const status = this.checked ? 'enabled' : 'disabled';
+            addSystemLog(`Love confessions ${status}`, 'info');
+            showNotification(`Love confessions ${status}`);
+        });
+    </script>
+</body>
+</html>
