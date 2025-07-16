@@ -274,30 +274,32 @@ function verifyAdminToken(req, res, next) {
 // Admin creates a new user
 app.post('/api/admin/create-user', verifyAdminToken, async (req, res) => {
   try {
-    const { username, email, password, anonymous_id } = req.body;
-    if (!username || !email || !password) {
-      return res.status(400).json({ error: 'All fields are required' });
+    const { name, email, password, anonymous_id, age, gender, location, bio, qualities, desired_qualities } = req.body;
+    if (!name || !email || !password || !anonymous_id) {
+      return res.status(400).json({ error: 'All fields (name, email, user ID, password) are required' });
     }
     const hashedPassword = await bcrypt.hash(password, 10);
-    const userAnonymousId = anonymous_id && anonymous_id.trim() ? anonymous_id.trim() : uuidv4();
-    dbHelpers.createUser({
-      anonymous_id: userAnonymousId,
-      username,
-      email,
-      password: hashedPassword
-    }, (err, userId) => {
-      if (err) {
-        console.error('DB error during user creation:', err);
-        if (err.message && err.message.includes('UNIQUE')) {
-          return res.status(400).json({ error: 'User ID or email already exists', details: err.message });
+    // Insert all fields, use NULL/default for optional ones if not provided
+    const db = new sqlite3.Database(path.join(__dirname, 'dating_game.db'));
+    db.run(
+      `INSERT INTO users (email, anonymous_id, password, name, age, gender, location, bio, qualities, desired_qualities)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [email, anonymous_id, hashedPassword, name, age || null, gender || null, location || null, bio || null, qualities || null, desired_qualities || null],
+      function(err) {
+        if (err) {
+          console.error('DB error during user creation:', err);
+          if (err.message && err.message.includes('UNIQUE')) {
+            return res.status(400).json({ error: 'User ID or email already exists', details: err.message });
+          }
+          return res.status(400).json({ error: 'User registration failed', details: err.message });
         }
-        return res.status(400).json({ error: 'User registration failed', details: err.message });
+        res.json({
+          success: true,
+          user: { id: this.lastID, anonymous_id, name, email }
+        });
       }
-      res.json({
-        success: true,
-        user: { id: userId, anonymous_id: userAnonymousId, username, email }
-      });
-    });
+    );
+    db.close();
   } catch (error) {
     console.error('Server error during user creation:', error);
     res.status(500).json({ error: 'Server error', details: error.message });
