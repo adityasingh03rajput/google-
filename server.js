@@ -24,6 +24,8 @@ const users = {};
 const userStats = {};
 // Track seen status for each message
 const seenStatus = {};
+// Track all messages for edit/delete
+const allMessages = {};
 
 // Milestone and coin settings
 const MILESTONES = {
@@ -151,6 +153,7 @@ wss.on('connection', (ws) => {
             id: Date.now() + Math.random().toString(36).slice(2)
           };
           seenStatus[msgObj.id] = [];
+          allMessages[msgObj.id] = msgObj;
           broadcast('text-message', msgObj);
           checkMilestones(username, 'messages');
           sendCoinUpdate(username, ws);
@@ -224,6 +227,21 @@ wss.on('connection', (ws) => {
         
       case 'request-coin-balance':
         sendCoinUpdate(username, ws);
+        break;
+
+      case 'edit-message':
+        // { type: 'edit-message', messageId, newText }
+        if (data.messageId && allMessages[data.messageId] && allMessages[data.messageId].username === username) {
+          allMessages[data.messageId].message = data.newText;
+          broadcast('message-edited', { messageId: data.messageId, newText: data.newText });
+        }
+        break;
+      case 'delete-message':
+        // { type: 'delete-message', messageId }
+        if (data.messageId && allMessages[data.messageId] && allMessages[data.messageId].username === username) {
+          delete allMessages[data.messageId];
+          broadcast('message-deleted', { messageId: data.messageId });
+        }
         break;
     }
   });
