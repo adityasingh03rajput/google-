@@ -151,6 +151,41 @@ app.post('/api/admin/create-user', verifyAdminToken, async (req, res) => {
   }
 });
 
+// API: User self-registration
+app.post('/api/register', async (req, res) => {
+  try {
+    const { name, email, password, anonymous_id, age, gender, location, bio, qualities, desired_qualities } = req.body;
+    if (!name || !email || !password || !anonymous_id) {
+      return res.status(400).json({ error: 'All fields (name, email, user ID, password) are required' });
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+    db.createUser({
+      name,
+      email,
+      password: hashedPassword,
+      anonymous_id,
+      age,
+      gender,
+      location,
+      bio,
+      qualities,
+      desired_qualities
+    }, function(err) {
+      if (err) {
+        console.error('DB error during user registration:', err);
+        if (err.message && err.message.includes('UNIQUE')) {
+          return res.status(400).json({ error: 'User ID or email already exists', details: err.message });
+        }
+        return res.status(400).json({ error: 'User registration failed', details: err.message });
+      }
+      res.json({ success: true, user: { id: this.lastID, anonymous_id, name, email } });
+    });
+  } catch (error) {
+    console.error('Server error during user registration:', error);
+    res.status(500).json({ error: 'Server error', details: error.message });
+  }
+});
+
 // API: User login
 app.post('/api/login', async (req, res) => {
   try {
@@ -204,6 +239,50 @@ app.get('/api/admin/stats', verifyAdminToken, (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch stats', details: err.message });
     }
     res.json(stats);
+  });
+});
+
+// API: Get matches for a user
+app.get('/api/matches/:userId', (req, res) => {
+  const userId = req.params.userId;
+  db.getUserMatches(userId, (err, matches) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to fetch matches', details: err.message });
+    }
+    res.json(matches);
+  });
+});
+
+// API: Get virtual gifts
+app.get('/api/gifts', (req, res) => {
+  db.getVirtualGifts((err, gifts) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to fetch gifts', details: err.message });
+    }
+    res.json(gifts);
+  });
+});
+
+// API: Get milestones for a user
+app.get('/api/milestones/:userId', (req, res) => {
+  const userId = req.params.userId;
+  db.getUserMilestones(userId, (err, milestones) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to fetch milestones', details: err.message });
+    }
+    res.json(milestones);
+  });
+});
+
+// API: Get messages between two users
+app.get('/api/messages/:userId/:partnerId', (req, res) => {
+  const userId = req.params.userId;
+  const partnerId = req.params.partnerId;
+  db.getMessages(userId, partnerId, (err, messages) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to fetch messages', details: err.message });
+    }
+    res.json(messages);
   });
 });
 
