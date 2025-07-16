@@ -14,23 +14,43 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
+// Improved CORS middleware
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
 
-// Admins table setup (if not exists)
-const sqlite3 = require('sqlite3').verbose();
-const sqliteDb = new sqlite3.Database(path.join(__dirname, 'dating_game.db'));
-sqliteDb.run(`CREATE TABLE IF NOT EXISTS admins (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE,
-  email TEXT UNIQUE,
-  password TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)`);
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', message: 'API is running', time: new Date().toISOString() });
+});
 
+// Root endpoint for API status
+app.get('/', (req, res) => {
+  res.json({
+    message: "Welcome to It's Over API!",
+    status: 'ok',
+    endpoints: [
+      '/api/register',
+      '/api/login',
+      '/api/admin/register',
+      '/api/admin/login',
+      '/api/admin/create-user',
+      '/api/admin/users',
+      '/api/admin/stats',
+      '/api/matches/:userId',
+      '/api/gifts',
+      '/api/milestones/:userId',
+      '/api/messages/:userId/:partnerId',
+      '/health'
+    ]
+  });
+});
+
+// Admins table setup is now in database.js
 // Serve admin panel
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
@@ -43,7 +63,7 @@ app.post('/api/admin/register', async (req, res) => {
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
-    sqliteDb.get('SELECT * FROM admins WHERE email = ? OR username = ?', [email, username], async (err, admin) => {
+    db.db.get('SELECT * FROM admins WHERE email = ? OR username = ?', [email, username], async (err, admin) => {
       if (err) {
         console.error('DB error during admin registration:', err);
         return res.status(500).json({ error: 'Database error', details: err.message });
@@ -52,7 +72,7 @@ app.post('/api/admin/register', async (req, res) => {
         return res.status(400).json({ error: 'Admin with this email or username already exists' });
       }
       const hashedPassword = await bcrypt.hash(password, 10);
-      sqliteDb.run(
+      db.db.run(
         'INSERT INTO admins (username, email, password) VALUES (?, ?, ?)',
         [username, email, hashedPassword],
         function(err) {
@@ -77,7 +97,7 @@ app.post('/api/admin/login', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
-    sqliteDb.get('SELECT * FROM admins WHERE email = ?', [email], async (err, admin) => {
+    db.db.get('SELECT * FROM admins WHERE email = ?', [email], async (err, admin) => {
       if (err || !admin) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
@@ -286,8 +306,19 @@ app.get('/api/messages/:userId/:partnerId', (req, res) => {
   });
 });
 
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Shutting down server...');
+  db.close();
+  server.close(() => {
+    process.exit(0);
+  });
+});
+
 // Start server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌐 API root: http://localhost:${PORT}/`);
+  console.log(`🩺 Health check: http://localhost:${PORT}/health`);
 });
