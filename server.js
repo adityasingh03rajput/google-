@@ -78,6 +78,14 @@ function initializeDatabase() {
       FOREIGN KEY(sender_id) REFERENCES users(id),
       FOREIGN KEY(receiver_id) REFERENCES users(id)
     )`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS admins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE,
+      email TEXT UNIQUE,
+      password TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
   });
 }
 
@@ -173,6 +181,41 @@ app.post('/api/register', async (req, res) => {
         success: true,
         user: { id: userId, anonymous_id, username, email }
       });
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Admin Registration Endpoint
+app.post('/api/admin/register', async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+    // Check if admin already exists
+    db.get('SELECT * FROM admins WHERE email = ? OR username = ?', [email, username], async (err, admin) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
+      }
+      if (admin) {
+        return res.status(400).json({ error: 'Admin with this email or username already exists' });
+      }
+      const hashedPassword = await bcrypt.hash(password, 10);
+      db.run(
+        'INSERT INTO admins (username, email, password) VALUES (?, ?, ?)',
+        [username, email, hashedPassword],
+        function(err) {
+          if (err) {
+            return res.status(500).json({ error: 'Registration failed' });
+          }
+          res.json({ 
+            success: true,
+            admin: { id: this.lastID, username, email }
+          });
+        }
+      );
     });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
