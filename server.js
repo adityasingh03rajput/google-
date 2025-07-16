@@ -1,87 +1,67 @@
-require('dotenv').config();
+// server.js
 const express = require('express');
-const cors = require('cors');
-const fetch = require('node-fetch');
+const http = require('http');
+const socketIo = require('socket.io');
+const { PythonShell } = require('python-shell');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const server = http.createServer(app);
+const io = socketIo(server);
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Store connected users
+const users = {};
 
-// API endpoint for predictions
-app.post('/api/predict', async (req, res) => {
-    try {
-        const { name, age, interest, question } = req.body;
+// Serve static files
+app.use(express.static('public'));
+
+// Socket.io connection
+io.on('connection', (socket) => {
+    console.log('New user connected');
+    
+    // Handle new user joining
+    socket.on('join', (username) => {
+        users[socket.id] = username;
+        socket.broadcast.emit('user-joined', username);
+    });
+    
+    // Handle text messages
+    socket.on('text-message', (message) => {
+        const username = users[socket.id];
+        io.emit('text-message', { username, message });
+    });
+    
+    // Handle sticker messages
+    socket.on('sticker-message', (stickerId) => {
+        const username = users[socket.id];
         
-        if (!question || !name) {
-            return res.status(400).json({ error: 'Name and question are required' });
-        }
-
-        // Enhanced prompt for personalized predictions
-        const prompt = `
-        Act as a mystical fortune teller. The querent is ${name}, ${age} years old, 
-        seeking guidance about ${interest}. Their specific question is: "${question}".
-
-        Provide a detailed 3-paragraph prediction that includes:
-        1. Current cosmic influences affecting their situation
-        2. What the near future (3-6 months) holds
-        3. Long-term possibilities and advice
+        // Optional: Process with Python
+        let options = {
+            mode: 'text',
+            pythonOptions: ['-u'],
+            scriptPath: './python_logic',
+            args: [stickerId, username]
+        };
         
-        Use mystical language with references to planetary alignments, energy flows, 
-        and cosmic signs. Maintain a positive yet mysterious tone. Avoid generic 
-        statements - be specific to their question and age group.
-        `;
-
-        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
-            },
-            body: JSON.stringify({
-                model: "mixtral-8x7b-32768",
-                messages: [
-                    {
-                        role: "system",
-                        content: "You are an accurate, insightful fortune teller with mystical abilities."
-                    },
-                    {
-                        role: "user",
-                        content: prompt
-                    }
-                ],
-                temperature: 0.7,
-                max_tokens: 500
-            })
+        PythonShell.run('sticker_processor.py', options, (err, results) => {
+            if (err) throw err;
+            // Results contains processed sticker data
+            io.emit('sticker-message', { 
+                username, 
+                stickerId,
+                processedData: results[0] 
+            });
         });
-
-        if (!groqResponse.ok) {
-            throw new Error(`API request failed with status ${groqResponse.status}`);
-        }
-
-        const data = await groqResponse.json();
-        const prediction = data.choices[0]?.message?.content || 
-                         "The cosmic energies are unclear at this moment. Try again later.";
-
-        res.json({ prediction });
-
-    } catch (error) {
-        console.error('Prediction error:', error);
-        res.status(500).json({ 
-            error: "The cosmic connection was disrupted",
-            details: error.message 
-        });
-    }
+    });
+    
+    // Handle disconnection
+    socket.on('disconnect', () => {
+        const username = users[socket.id];
+        delete users[socket.id];
+        socket.broadcast.emit('user-left', username);
+    });
 });
 
-// Root endpoint
-app.get('/', (req, res) => {
-    res.send('Future Visionary API is running');
-});
-
-// Start server
-app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
