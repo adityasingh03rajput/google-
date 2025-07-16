@@ -6,10 +6,18 @@ const { PythonShell } = require('python-shell');
 const path = require('path');
 
 const app = express();
+
+// Add CORS middleware for API endpoints
+const cors = require('cors');
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST']
+}));
+
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    origin: '*',
     methods: ["GET", "POST"]
   }
 });
@@ -29,10 +37,21 @@ app.get('/api/status', (req, res) => {
 io.on('connection', (socket) => {
   console.log('New user connected:', socket.id);
 
+  // Send user list to a specific socket
+  function sendUserList() {
+    io.emit('user-list', Object.values(users));
+  }
+
+  // Handle user list request
+  socket.on('request-user-list', () => {
+    sendUserList();
+  });
+
   // Handle new user joining
   socket.on('join', (username) => {
     users[socket.id] = username;
     io.emit('user-joined', username);
+    sendUserList();
   });
 
   // Handle text messages
@@ -47,7 +66,7 @@ io.on('connection', (socket) => {
     
     // Process with Python (optional)
     PythonShell.run(
-      './python_logic/sticker_processor.py',
+      path.join(__dirname, 'sticker_processor.py'),
       {
         mode: 'text',
         pythonOptions: ['-u'],
@@ -76,6 +95,7 @@ io.on('connection', (socket) => {
     if (username) {
       delete users[socket.id];
       io.emit('user-left', username);
+      sendUserList();
     }
   });
 });
