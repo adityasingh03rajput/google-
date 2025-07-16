@@ -222,6 +222,83 @@ app.post('/api/admin/register', async (req, res) => {
   }
 });
 
+// Admin Login Endpoint
+app.post('/api/admin/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+    db.get('SELECT * FROM admins WHERE email = ?', [email], async (err, admin) => {
+      if (err || !admin) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      const isMatch = await bcrypt.compare(password, admin.password);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      const token = jwt.sign(
+        { adminId: admin.id, email: admin.email },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+      res.json({
+        token,
+        admin: {
+          id: admin.id,
+          username: admin.username,
+          email: admin.email
+        }
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Middleware to verify admin JWT
+function verifyAdminToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'No token provided' });
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) return res.status(403).json({ error: 'Invalid token' });
+    req.admin = decoded;
+    next();
+  });
+}
+
+// Admin creates a new user
+app.post('/api/admin/create-user', verifyAdminToken, async (req, res) => {
+  try {
+    const { username, email, password, anonymous_id } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const userAnonymousId = anonymous_id && anonymous_id.trim() ? anonymous_id.trim() : uuidv4();
+    dbHelpers.createUser({
+      anonymous_id: userAnonymousId,
+      username,
+      email,
+      password: hashedPassword
+    }, (err, userId) => {
+      if (err) {
+        if (err.message && err.message.includes('UNIQUE')) {
+          return res.status(400).json({ error: 'User ID or email already exists' });
+        }
+        return res.status(400).json({ error: 'User registration failed' });
+      }
+      res.json({
+        success: true,
+        user: { id: userId, anonymous_id: userAnonymousId, username, email }
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
