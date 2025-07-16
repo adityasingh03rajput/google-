@@ -8,8 +8,13 @@ const WebSocket = require('ws');
 const app = express();
 const server = http.createServer(app);
 
-// Serve static files from the 'public' directory
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve static files from the current directory
+app.use(express.static(__dirname));
+
+// Serve index.html for root route
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 // API endpoint to check server status
 app.get('/api/status', (req, res) => {
@@ -168,22 +173,19 @@ wss.on('connection', (ws) => {
           }
           userStats[username].coins -= STICKER_COST;
           userStats[username].stickers += 1;
-          // Note: Python sticker processing is still here. You can remove it if not needed.
-          PythonShell.run(
-            path.join(__dirname, 'sticker_processor.py'),
-            { args: [data.stickerId, username] },
-            (err, results) => {
-              const stickerData = err ? { stickerCode: '❓' } : JSON.parse(results[0]);
-              broadcast('sticker-message', {
-                ...stickerData,
-                username,
-                stickerId: data.stickerId,
-                timestamp: new Date().toISOString()
-              });
-              checkMilestones(username, 'stickers');
-              sendCoinUpdate(username, ws);
-            }
-          );
+          
+          // Simple sticker processing without Python
+          const stickerData = {
+            stickerCode: data.stickerId,
+            username,
+            stickerId: data.stickerId,
+            timestamp: new Date().toISOString(),
+            id: Date.now() + Math.random().toString(36).slice(2)
+          };
+          
+          broadcast('sticker-message', stickerData);
+          checkMilestones(username, 'stickers');
+          sendCoinUpdate(username, ws);
         }
         break;
         
@@ -230,14 +232,13 @@ wss.on('connection', (ws) => {
         break;
 
       case 'edit-message':
-        // { type: 'edit-message', messageId, newText }
         if (data.messageId && allMessages[data.messageId] && allMessages[data.messageId].username === username) {
           allMessages[data.messageId].message = data.newText;
           broadcast('message-edited', { messageId: data.messageId, newText: data.newText });
         }
         break;
+        
       case 'delete-message':
-        // { type: 'delete-message', messageId }
         if (data.messageId && allMessages[data.messageId] && allMessages[data.messageId].username === username) {
           delete allMessages[data.messageId];
           broadcast('message-deleted', { messageId: data.messageId });
@@ -249,7 +250,6 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (ws.username) {
       delete users[ws._socket.remotePort];
-      // Note: userStats are kept for now, so returning users keep their stats.
       broadcast('user-left', { username: ws.username });
       sendUserList();
     }
@@ -258,5 +258,6 @@ wss.on('connection', (ws) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+  console.log(`🚀 WebSocket Chat Server running at http://localhost:${PORT}`);
+  console.log(`📡 WebSocket endpoint: ws://localhost:${PORT}`);
 });
