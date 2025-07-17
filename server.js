@@ -1,222 +1,523 @@
-// LoveConnect Dating App WebSocket Server (Full Rewrite)
-// Author: GPT-4
-
+// Dating App WebSocket Server with Authentication and Exclusive Matching
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-// --- Config ---
+// Server configuration
 const PORT = 3001;
-const DATA_DIR = path.join(__dirname, 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const PROFILES_FILE = path.join(DATA_DIR, 'profiles.json');
-const INITIAL_COINS = 50;
-
-// --- Ensure Data Directory ---
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
-
-// --- In-memory State ---
-const sessions = new Map(); // username -> { ws, coins, currentMatch, ... }
-let users = {};             // username -> { passwordHash, displayName, createdAt }
-let profiles = {};          // username -> { displayName, bio, ... }
-let matches = {};           // matchId -> { user1, user2, roomId, createdAt }
-let rooms = {};             // roomId -> { participants, messages, createdAt }
-
-// --- Persistence Helpers ---
-function loadJson(file, fallback = {}) {
-  try {
-    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch (e) { console.error('Failed to load', file, e); }
-  return fallback;
-}
-function saveJson(file, data) {
-  try { fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8'); } catch (e) { console.error('Failed to save', file, e); }
-}
-users = loadJson(USERS_FILE);
-profiles = loadJson(PROFILES_FILE);
-setInterval(() => { saveJson(USERS_FILE, users); saveJson(PROFILES_FILE, profiles); }, 60000);
-
-// --- Auth Helpers ---
-function hashPassword(pw) { return crypto.createHash('sha256').update(pw).digest('hex'); }
-function verifyPassword(pw, hash) { return hashPassword(pw) === hash; }
-
-// --- WebSocket Server ---
 const wss = new WebSocket.Server({ port: PORT });
-console.log(`LoveConnect server running on ws://localhost:${PORT}`);
 
-wss.on('connection', ws => {
-  let username = null;
+// Data storage
+const users = new Map(); // username -> { ws, displayName, currentMatch, messages }
+const registeredUsers = new Map(); // username -> { passwordHash, displayName, createdAt }
+const activeMatches = new Map(); // matchId -> { user1, user2, messages, createdAt }
 
-  ws.on('message', msg => {
+// Ensure data directory exists
+const DATA_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR);
+}
+
+// Authentication helpers
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+function verifyPassword(password, hash) {
+  return hashPassword(password) === hash;
+}
+
+// Load registered users from disk
+const USERS_FILE = path.join(DATA_DIR, 'auth-users.json');
+try {
+  if (fs.existsSync(USERS_FILE)) {
+    const userData = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+    Object.entries(userData).forEach(([username, data]) => {
+      registeredUsers.set(username, data);
+    });
+    console.log(`Loaded ${registeredUsers.size} registered users`);
+  }
+} catch (err) {
+  console.error('Error loading users:', err);
+}
+
+// Save registered users
+function saveUsers() {
+  try {
+    const userData = {};
+    registeredUsers.forEach((data, username) => {
+      userData[username] = data;
+    });
+    fs.writeFileSync(USERS_FILE, JSON.stringify(userData, null, 2), 'utf8');
+    console.log('Users saved successfully');
+  } catch (err) {
+    console.error('Error saving users:', err);
+  }
+}
+
+// Save users periodically
+setInterval(saveUsers, 60000); // Save every minute
+
+// Get available matches for a user (users who don't have active matches)
+function getAvailableMatches(currentUsername) {
+  const availableUsers = [];
+  
+  users.forEach((userData, username) => {
+    if (username !== currentUsername && !userData.currentMatch) {
+      availableUsers.push({
+        username: username,
+        displayName: userData.displayName,
+        hasMatch: false,
+        compatibility: Math.floor(Math.random() * 20) + 80 // Random compatibility 80-100%
+      });
+    }
+  });
+  
+  return availableUsers;
+}
+
+// Create exclusive match between two users
+function createMatch(user1, user2) {
+  const matchId = uuidv4();
+  
+  // Set current match for both users
+  const userData1 = users.get(user1);
+  const userData2 = users.get(user2);
+  
+  if (!userData1 || !userData2) {
+    return null;
+  }
+  
+  // Check if either user already has a match
+  if (userData1.currentMatch || userData2.currentMatch) {
+    return null;
+  }
+  
+  const matchData = {
+    user1: user1,
+    user2: user2,
+    messages: [],
+    createdAt: Date.now()
+  };
+  
+  // Store active match
+  activeMatches.set(matchId, matchData);
+  
+  // Set current match for both users
+  userData1.currentMatch = {
+    matchId: matchId,
+    partner: user2,
+    partnerDisplayName: userData2.displayName
+  };
+  
+  userData2.currentMatch = {
+    matchId: matchId,
+    partner: user1,
+    partnerDisplayName: userData1.displayName
+  };
+  
+  return matchId;
+}
+
+// Remove match and allow users to find new matches
+function removeMatch(matchId) {
+  const match = activeMatches.get(matchId);
+  if (!match) return false;
+  
+  // Clear current match for both users
+  const user1Data = users.get(match.user1);
+  const user2Data = users.get(match.user2);
+  
+  if (user1Data) user1Data.currentMatch = null;
+  if (user2Data) user2Data.currentMatch = null;
+  
+  // Remove from active matches
+  activeMatches.delete(matchId);
+  
+  return true;
+}
+
+// Broadcast to specific users
+function sendToUser(username, data) {
+  const user = users.get(username);
+  if (user && user.ws.readyState === WebSocket.OPEN) {
+    user.ws.send(JSON.stringify(data));
+  }
+}
+
+// Send available matches to a user
+function sendAvailableMatches(username) {
+  const matches = getAvailableMatches(username);
+  sendToUser(username, {
+    type: 'available-matches',
+    matches: matches
+  });
+}
+
+// Broadcast available matches to all users
+function broadcastAvailableMatches() {
+  users.forEach((userData, username) => {
+    sendAvailableMatches(username);
+  });
+}
+
+// WebSocket connection handler
+wss.on('connection', (ws) => {
+  let currentUsername = null;
+
+  ws.on('message', (msg) => {
     let data;
-    try { data = JSON.parse(msg); } catch { ws.send(json({ type: 'error', message: 'Invalid JSON' })); return; }
-
-    // --- Registration ---
-    if (data.type === 'register') {
-      if (!data.username || !data.password || !data.displayName) return ws.send(json({ type: 'auth-error', message: 'Missing fields' }));
-      if (users[data.username]) return ws.send(json({ type: 'auth-error', message: 'Username taken' }));
-      users[data.username] = { passwordHash: hashPassword(data.password), displayName: data.displayName, createdAt: Date.now() };
-      profiles[data.username] = { displayName: data.displayName, bio: '', age: null, location: '', interests: [], qualities: [], coins: INITIAL_COINS };
-      saveJson(USERS_FILE, users); saveJson(PROFILES_FILE, profiles);
-      username = data.username;
-      sessions.set(username, { ws, coins: INITIAL_COINS, currentMatch: null });
-      ws.send(json({ type: 'auth-success', profile: profiles[username], coins: INITIAL_COINS }));
-      broadcastUserList();
-      sendMatches(username);
+    try {
+      data = JSON.parse(msg);
+    } catch (err) {
+      console.error('Invalid message format:', err);
       return;
     }
 
-    // --- Login ---
-    if (data.type === 'login') {
-      const user = users[data.username];
-      if (!user || !verifyPassword(data.password, user.passwordHash)) return ws.send(json({ type: 'auth-error', message: 'Invalid credentials' }));
-        username = data.username;
-      sessions.set(username, { ws, coins: profiles[username]?.coins || INITIAL_COINS, currentMatch: null });
-      ws.send(json({ type: 'auth-success', profile: profiles[username], coins: profiles[username]?.coins || INITIAL_COINS }));
-      broadcastUserList();
-      sendMatches(username);
+    switch (data.type) {
+      case 'register': {
+        const { username, displayName, password } = data;
+        
+        if (!username || !displayName || !password) {
+          ws.send(JSON.stringify({
+            type: 'auth-error',
+            message: 'Missing required fields'
+          }));
           return;
         }
         
-    // --- Auth Required ---
-    if (!username) return ws.send(json({ type: 'error', message: 'Not authenticated' }));
-
-    // --- Profile Update ---
-    if (data.type === 'update-profile') {
-      const allowed = ['displayName','bio','age','location','interests','qualities'];
-      for (const k of allowed) if (data[k] !== undefined) profiles[username][k] = data[k];
-      saveJson(PROFILES_FILE, profiles);
-      ws.send(json({ type: 'profile-updated', profile: profiles[username] }));
-      sendMatches(username);
+        if (registeredUsers.has(username)) {
+          ws.send(JSON.stringify({
+            type: 'auth-error',
+            message: 'Username already exists'
+          }));
           return;
         }
         
-    // --- Get Matches ---
-    if (data.type === 'get-matches') {
-      sendMatches(username);
+        // Create new user account
+        const passwordHash = hashPassword(password);
+        registeredUsers.set(username, {
+          passwordHash: passwordHash,
+          displayName: displayName,
+          createdAt: Date.now()
+        });
+        
+        // Set current user
+        currentUsername = username;
+        users.set(username, {
+          ws: ws,
+          displayName: displayName,
+          currentMatch: null,
+          messages: []
+        });
+        
+        // Send success response
+        ws.send(JSON.stringify({
+          type: 'auth-success',
+          username: username,
+          displayName: displayName
+        }));
+        
+        // Send available matches
+        sendAvailableMatches(username);
+        
+        // Broadcast updated matches to all users
+        broadcastAvailableMatches();
+        
+        // Save users
+        saveUsers();
+        
+        console.log(`User registered: ${username} (${displayName})`);
+        break;
+      }
+      
+      case 'login': {
+        const { username, password } = data;
+        
+        if (!username || !password) {
+          ws.send(JSON.stringify({
+            type: 'auth-error',
+            message: 'Missing username or password'
+          }));
           return;
         }
         
-    // --- Create Match ---
-    if (data.type === 'create-match') {
-      const target = data.targetUser;
-      if (!target || !profiles[target] || username === target) return ws.send(json({ type: 'error', message: 'Invalid match target' }));
-      if (getCurrentMatch(username) || getCurrentMatch(target)) return ws.send(json({ type: 'error', message: 'Already matched' }));
-      const matchId = uuidv4();
-      const roomId = 'room_' + matchId;
-      matches[matchId] = { user1: username, user2: target, roomId, createdAt: Date.now() };
-      rooms[roomId] = { participants: [username, target], messages: [], createdAt: Date.now() };
-      sessions.get(username).currentMatch = { partner: target, roomId, matchId };
-      sessions.get(target)?.ws?.send(json({ type: 'match-created', partner: username, partnerProfile: profiles[username], roomId, matchId }));
-      ws.send(json({ type: 'match-created', partner: target, partnerProfile: profiles[target], roomId, matchId }));
-        updateAllMatches();
+        const user = registeredUsers.get(username);
+        if (!user || !verifyPassword(password, user.passwordHash)) {
+          ws.send(JSON.stringify({
+            type: 'auth-error',
+            message: 'Invalid username or password'
+          }));
           return;
         }
         
-    // --- End Match ---
-    if (data.type === 'end-match') {
-      const match = getCurrentMatch(username);
-      if (!match) return ws.send(json({ type: 'error', message: 'No active match' }));
-      const partner = match.partner;
-      sessions.get(username).currentMatch = null;
-      sessions.get(partner).currentMatch = null;
-      delete matches[match.matchId];
-      ws.send(json({ type: 'match-ended', partner }));
-      sessions.get(partner)?.ws?.send(json({ type: 'match-ended', partner: username }));
-        updateAllMatches();
+        // Set current user
+        currentUsername = username;
+        users.set(username, {
+          ws: ws,
+          displayName: user.displayName,
+          currentMatch: null,
+          messages: []
+        });
+        
+        // Send success response
+        ws.send(JSON.stringify({
+          type: 'auth-success',
+          username: username,
+          displayName: user.displayName
+        }));
+        
+        // Send available matches
+        sendAvailableMatches(username);
+        
+        // Broadcast updated matches to all users
+        broadcastAvailableMatches();
+        
+        console.log(`User logged in: ${username} (${user.displayName})`);
+        break;
+      }
+      
+      case 'reconnect': {
+        const { username } = data;
+        
+        if (!registeredUsers.has(username)) {
+          ws.send(JSON.stringify({
+            type: 'auth-error',
+            message: 'User not found'
+          }));
           return;
         }
         
-    // --- Start Conversation ---
-    if (data.type === 'start-conversation') {
-      const target = data.targetUser;
-      if (!target || !profiles[target]) return ws.send(json({ type: 'error', message: 'User not found' }));
-      const roomId = getOrCreateRoom(username, target);
-      ws.send(json({ type: 'conversation-started', roomId, targetUser: target, messages: rooms[roomId].messages }));
-      sessions.get(target)?.ws?.send(json({ type: 'conversation-request', roomId, fromUser: username, fromUserProfile: profiles[username] }));
+        const user = registeredUsers.get(username);
+        currentUsername = username;
+        
+        // Update user connection
+        users.set(username, {
+          ws: ws,
+          displayName: user.displayName,
+          currentMatch: users.get(username)?.currentMatch || null,
+          messages: users.get(username)?.messages || []
+        });
+        
+        // Send current match if exists
+        const userData = users.get(username);
+        if (userData.currentMatch) {
+          ws.send(JSON.stringify({
+            type: 'match-created',
+            match: userData.currentMatch
+          }));
+        }
+        
+        // Send available matches
+        sendAvailableMatches(username);
+        
+        console.log(`User reconnected: ${username}`);
+        break;
+      }
+      
+      case 'request-match': {
+        if (!currentUsername) {
+          ws.send(JSON.stringify({
+            type: 'auth-error',
+            message: 'Not authenticated'
+          }));
           return;
         }
         
-    // --- Send Message ---
-    if (data.type === 'send-message') {
-      const { roomId, message } = data;
-      if (!roomId || !message || !rooms[roomId] || !rooms[roomId].participants.includes(username)) return ws.send(json({ type: 'error', message: 'Room not found or access denied' }));
-      const msgObj = { id: uuidv4(), sender: username, content: message, timestamp: Date.now(), type: 'text' };
-      rooms[roomId].messages.push(msgObj);
-      for (const p of rooms[roomId].participants) sessions.get(p)?.ws?.send(json({ type: 'new-message', roomId, message: msgObj }));
+        const { targetUser } = data;
+        const currentUserData = users.get(currentUsername);
+        const targetUserData = users.get(targetUser);
+        
+        if (!targetUserData) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'Target user not found'
+          }));
           return;
         }
         
-    // --- Send Virtual Gift ---
-    if (data.type === 'send-virtual-gift') {
-      const { recipient, giftType, message: giftMsg } = data;
-      if (!recipient || !giftType || !sessions.get(recipient)) return ws.send(json({ type: 'error', message: 'Recipient not found/online' }));
-      const cost = { flower: 5, chocolate: 10, teddy: 20, ring: 50 }[giftType] || 10;
-      if (sessions.get(username).coins < cost) return ws.send(json({ type: 'error', message: `Not enough coins. This gift costs ${cost} coins.` }));
-      sessions.get(username).coins -= cost;
-      profiles[username].coins = sessions.get(username).coins;
-      const gift = { id: uuidv4(), type: giftType, sender: username, message: giftMsg || '', timestamp: Date.now(), cost };
-      sessions.get(recipient).ws.send(json({ type: 'gift-received', gift }));
-      ws.send(json({ type: 'gift-sent', gift, remainingCoins: sessions.get(username).coins }));
-      saveJson(PROFILES_FILE, profiles);
+        // Check if current user already has a match
+        if (currentUserData.currentMatch) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'You already have an active match'
+          }));
           return;
         }
         
-    // --- Schedule Virtual Date ---
-    if (data.type === 'schedule-virtual-date') {
-      const { partner, dateTime, activity, description } = data;
-      if (!partner || !dateTime || !activity || !profiles[partner]) return ws.send(json({ type: 'error', message: 'Missing fields or partner not found' }));
-      const virtualDate = { id: uuidv4(), initiator: username, partner, dateTime, activity, description: description || '', status: 'pending' };
-      if (!profiles[username].virtualDates) profiles[username].virtualDates = [];
-      profiles[username].virtualDates.push(virtualDate);
-      saveJson(PROFILES_FILE, profiles);
-      sessions.get(partner)?.ws?.send(json({ type: 'virtual-date-invitation', date: virtualDate }));
-      ws.send(json({ type: 'virtual-date-scheduled', date: virtualDate }));
+        // Check if target user already has a match
+        if (targetUserData.currentMatch) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'This user is already matched with someone else'
+          }));
           return;
+        }
+        
+        // Create match
+        const matchId = createMatch(currentUsername, targetUser);
+        if (!matchId) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to create match'
+          }));
+          return;
+        }
+        
+        // Notify both users about the match
+        const currentMatch = currentUserData.currentMatch;
+        const targetMatch = targetUserData.currentMatch;
+        
+        sendToUser(currentUsername, {
+          type: 'match-created',
+          match: currentMatch
+        });
+        
+        sendToUser(targetUser, {
+          type: 'match-created',
+          match: targetMatch
+        });
+        
+        // Broadcast updated available matches to all users
+        broadcastAvailableMatches();
+        
+        console.log(`Match created: ${currentUsername} <-> ${targetUser}`);
+        break;
+      }
+      
+      case 'send-message': {
+        if (!currentUsername) {
+          ws.send(JSON.stringify({
+            type: 'auth-error',
+            message: 'Not authenticated'
+          }));
+          return;
+        }
+        
+        const userData = users.get(currentUsername);
+        if (!userData.currentMatch) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'No active match to send message to'
+          }));
+          return;
+        }
+        
+        const { message } = data;
+        if (!message || !message.trim()) {
+          return;
+        }
+        
+        const messageData = {
+          id: uuidv4(),
+          sender: currentUsername,
+          content: message.trim(),
+          timestamp: Date.now()
+        };
+        
+        // Store message in match
+        const match = activeMatches.get(userData.currentMatch.matchId);
+        if (match) {
+          match.messages.push(messageData);
+        }
+        
+        // Send message to both users
+        const partner = userData.currentMatch.partner;
+        
+        sendToUser(currentUsername, {
+          type: 'new-message',
+          message: messageData
+        });
+        
+        sendToUser(partner, {
+          type: 'new-message',
+          message: messageData
+        });
+        
+        break;
+      }
+      
+      case 'end-match': {
+        if (!currentUsername) {
+          ws.send(JSON.stringify({
+            type: 'auth-error',
+            message: 'Not authenticated'
+          }));
+          return;
+        }
+        
+        const userData = users.get(currentUsername);
+        if (!userData.currentMatch) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'No active match to end'
+          }));
+          return;
+        }
+        
+        const partner = userData.currentMatch.partner;
+        const matchId = userData.currentMatch.matchId;
+        
+        // Remove match
+        if (removeMatch(matchId)) {
+          // Notify both users
+          sendToUser(currentUsername, {
+            type: 'match-ended'
+          });
+          
+          sendToUser(partner, {
+            type: 'match-ended'
+          });
+          
+          // Broadcast updated available matches
+          broadcastAvailableMatches();
+          
+          console.log(`Match ended: ${currentUsername} <-> ${partner}`);
+        }
+        
+        break;
+      }
     }
   });
 
   ws.on('close', () => {
-    if (username) { sessions.delete(username); broadcastUserList(); }
+    if (currentUsername) {
+      console.log(`User disconnected: ${currentUsername}`);
+      
+      // Keep user data but mark as offline
+      const userData = users.get(currentUsername);
+      if (userData) {
+        userData.ws = null;
+      }
+      
+      // Don't remove user completely to maintain matches
+      // users.delete(currentUsername);
+    }
+  });
+
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
   });
 });
 
-// --- Utility Functions ---
-function json(obj) { return JSON.stringify(obj); }
-function broadcastUserList() {
-  const online = Array.from(sessions.keys()).map(u => ({ username: u, displayName: profiles[u]?.displayName || u }));
-  for (const s of sessions.values()) s.ws.send(json({ type: 'user-list', users: online }));
-}
-function getCurrentMatch(username) { return sessions.get(username)?.currentMatch; }
-function sendMatches(username) {
-  const userProfile = profiles[username];
-  if (!userProfile) return;
-  const available = Object.keys(profiles).filter(u => u !== username && !getCurrentMatch(u)).map(u => ({
-    username: u,
-    displayName: profiles[u].displayName,
-    bio: profiles[u].bio || '',
-    age: profiles[u].age || null,
-    location: profiles[u].location || '',
-    matchPercentage: calcMatchPercent(userProfile, profiles[u])
-  })).sort((a, b) => b.matchPercentage - a.matchPercentage);
-  sessions.get(username)?.ws?.send(json({ type: 'matches-update', matches: available }));
-}
-function updateAllMatches() { for (const u of sessions.keys()) sendMatches(u); }
-function getOrCreateRoom(u1, u2) {
-  const key = [u1, u2].sort().join('_');
-  let roomId = Object.keys(rooms).find(rid => rooms[rid].participants.sort().join('_') === key);
-  if (!roomId) {
-    roomId = 'private_' + uuidv4();
-    rooms[roomId] = { participants: [u1, u2], messages: [], createdAt: Date.now() };
-  }
-  return roomId;
-}
-function calcMatchPercent(p1, p2) {
-  let score = 0, total = 0;
-  if (p1.interests && p2.interests) { score += intersect(p1.interests, p2.interests).length * 2; total += Math.max(p1.interests.length, p2.interests.length) * 2; }
-  if (p1.qualities && p2.qualities) { score += intersect(p1.qualities, p2.qualities).length * 2; total += Math.max(p1.qualities.length, p2.qualities.length) * 2; }
-  return total ? Math.round((score / total) * 100) : 0;
-}
-function intersect(a, b) { return a.filter(x => b.includes(x)); }
+// Cleanup inactive matches periodically
+setInterval(() => {
+  const now = Date.now();
+  const MATCH_TIMEOUT = 24 * 60 * 60 * 1000; // 24 hours
+  
+  activeMatches.forEach((match, matchId) => {
+    if (now - match.createdAt > MATCH_TIMEOUT) {
+      console.log(`Cleaning up inactive match: ${matchId}`);
+      removeMatch(matchId);
+    }
+  });
+}, 60 * 60 * 1000); // Check every hour
+
+console.log(`Dating App Authentication Server running on ws://localhost:${PORT}`);
+console.log('Features:');
+console.log('- User registration and login');
+console.log('- Exclusive matching (1-on-1 only)');
+console.log('- Private chat for matched couples');
+console.log('- Match management (create/end matches)');
