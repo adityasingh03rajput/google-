@@ -34,10 +34,6 @@ const MILESTONES = [
   { threshold: 50, message: "Chat superstar!", coins: 20 }
 ];
 
-// Car Crash Game data
-const carCrashScores = new Map(); // username -> score
-const CAR_CRASH_COIN_REWARD = 5; // Coins awarded for high scores
-
 // Permanent match storage: username -> { match: username, room: roomId }
 const permanentMatches = new Map();
 const REST_ROOM = 'rest_room';
@@ -64,15 +60,15 @@ function checkMilestones(username, newCoinCount) {
   if (!user) return;
 
   for (const milestone of MILESTONES) {
-    if (newCoinCount >= milestone.threshold &&
-      (!user.milestonesReached || !user.milestonesReached.includes(milestone.threshold))) {
+    if (newCoinCount >= milestone.threshold && 
+        (!user.milestonesReached || !user.milestonesReached.includes(milestone.threshold))) {
       // Mark this milestone as reached
       if (!user.milestonesReached) user.milestonesReached = [];
       user.milestonesReached.push(milestone.threshold);
-
+      
       // Award bonus coins
       user.coins += milestone.coins;
-
+      
       // Notify user
       const ws = user.ws;
       if (ws.readyState === WebSocket.OPEN) {
@@ -82,7 +78,7 @@ function checkMilestones(username, newCoinCount) {
           coins: milestone.coins,
           username: username
         }));
-
+        
         // Also send coin update
         ws.send(JSON.stringify({
           type: 'coin-update',
@@ -126,17 +122,8 @@ wss.on('connection', (ws, req) => {
         };
         return;
       }
-
+      
       switch (data.type) {
-        case 'game-auth':
-          // Handle authentication from game.html
-          if (data.username) {
-            username = data.username;
-            // Don't create a new user, just use this connection for game messages
-            return;
-          }
-          break;
-          
         case 'join':
           // Generate random username if not provided
           if (!data.username) {
@@ -146,9 +133,9 @@ wss.on('connection', (ws, req) => {
           }
           // Check if username is already taken
           if (users.has(username)) {
-            ws.send(JSON.stringify({
-              type: 'error',
-              message: 'Username already taken. Please choose another.'
+            ws.send(JSON.stringify({ 
+              type: 'error', 
+              message: 'Username already taken. Please choose another.' 
             }));
             ws.close();
             return;
@@ -194,18 +181,12 @@ wss.on('connection', (ws, req) => {
             coins: INITIAL_COINS,
             username: username
           }));
-          ws.send(JSON.stringify({
-            type: 'rest-room',
-            message: 'Welcome to the Rest Room! Try the Car Crash Game to earn coins!'
-          }));
+          ws.send(JSON.stringify({ type: 'rest-room' }));
           updateUserList();
           // Try to match
           let matchedRoom = null;
           if (userProfile) {
-            let matched = false;
             for (const [otherUsername, otherUser] of users.entries()) {
-              if (matched) break;
-              if (otherUsername === username) continue; // Prevent matching with self
               if (!otherUser.profile || otherUser.room !== REST_ROOM) continue;
               if (permanentMatches.has(username) || permanentMatches.has(otherUsername)) continue;
               if (userProfile.city !== otherUser.profile.city) continue;
@@ -218,14 +199,12 @@ wss.on('connection', (ws, req) => {
               const reverseMoviesMatch = otherUser.profile.expectedMovies.every(m => userProfile.movies.includes(m));
               const reverseSongsMatch = otherUser.profile.expectedSongs.every(s => userProfile.songs.includes(s));
               if (qualitiesMatch && interestsMatch && moviesMatch && songsMatch && reverseQualitiesMatch && reverseInterestsMatch && reverseMoviesMatch && reverseSongsMatch) {
-                matched = true;
                 matchedRoom = `room_${username}_${otherUsername}_${Date.now()}`;
                 rooms.set(matchedRoom, [username, otherUsername]);
                 otherUser.room = matchedRoom;
                 users.get(username).room = matchedRoom;
                 permanentMatches.set(username, { match: otherUsername, room: matchedRoom });
                 permanentMatches.set(otherUsername, { match: username, room: matchedRoom });
-                assignedRoom = matchedRoom; // Ensure assignedRoom is updated for this session
                 if (otherUser.ws.readyState === WebSocket.OPEN) {
                   otherUser.ws.send(JSON.stringify({ type: 'matched', room: matchedRoom, with: username }));
                 }
@@ -235,7 +214,7 @@ wss.on('connection', (ws, req) => {
             }
           }
           break;
-
+          
         case 'text-message':
           // Broadcast text message to all users
           const textMsg = {
@@ -251,20 +230,20 @@ wss.on('connection', (ws, req) => {
           roomMessages.get(textMsg.room).push({ ...textMsg });
           broadcast(textMsg, null, textMsg.room);
           break;
-
+          
         case 'sticker-message':
           // Handle sticker message (with coin cost)
           const user = users.get(username);
           if (user.coins >= STICKER_COST) {
             user.coins -= STICKER_COST;
-
+            
             // Send coin update to sender
             ws.send(JSON.stringify({
               type: 'coin-update',
               coins: user.coins,
               username
             }));
-
+            
             // Broadcast sticker to all users
             broadcast({
               type: 'sticker-message',
@@ -272,7 +251,7 @@ wss.on('connection', (ws, req) => {
               stickerCode: stickers[data.stickerId] || '❓',
               timestamp: Date.now()
             });
-
+            
             // Check for milestones
             checkMilestones(username, user.coins);
           } else {
@@ -282,12 +261,12 @@ wss.on('connection', (ws, req) => {
             }));
           }
           break;
-
+          
         case 'coin-transfer':
           // Handle coin transfer between users
           const fromUser = users.get(username);
           const toUser = users.get(data.to);
-
+          
           if (!toUser) {
             ws.send(JSON.stringify({
               type: 'coin-transfer-error',
@@ -295,7 +274,7 @@ wss.on('connection', (ws, req) => {
             }));
             return;
           }
-
+          
           if (data.amount <= 0) {
             ws.send(JSON.stringify({
               type: 'coin-transfer-error',
@@ -303,7 +282,7 @@ wss.on('connection', (ws, req) => {
             }));
             return;
           }
-
+          
           if (fromUser.coins < data.amount) {
             ws.send(JSON.stringify({
               type: 'coin-transfer-error',
@@ -311,23 +290,23 @@ wss.on('connection', (ws, req) => {
             }));
             return;
           }
-
+          
           // Perform transfer
           fromUser.coins -= data.amount;
           toUser.coins += data.amount;
-
+          
           // Update sender
           ws.send(JSON.stringify({
             type: 'coin-update',
             coins: fromUser.coins,
             username
           }));
-
+          
           ws.send(JSON.stringify({
             type: 'coin-transfer-success',
             message: `Sent ${data.amount} coins to ${data.to}.`
           }));
-
+          
           // Update recipient if they're online
           if (toUser.ws.readyState === WebSocket.OPEN) {
             toUser.ws.send(JSON.stringify({
@@ -335,18 +314,18 @@ wss.on('connection', (ws, req) => {
               coins: toUser.coins,
               username: data.to
             }));
-
+            
             toUser.ws.send(JSON.stringify({
               type: 'coin-transfer-received',
               message: `Received ${data.amount} coins from ${username}.`
             }));
           }
-
+          
           // Check milestones for both users
           checkMilestones(username, fromUser.coins);
           checkMilestones(data.to, toUser.coins);
           break;
-
+          
         case 'request-user-list':
           // Send current user list to requester
           ws.send(JSON.stringify({
@@ -354,7 +333,7 @@ wss.on('connection', (ws, req) => {
             users: Array.from(users.keys())
           }));
           break;
-
+          
         case 'seen-message':
           // Handle message seen notification
           if (data.messageId && users.has(data.seenBy)) {
@@ -377,70 +356,12 @@ wss.on('connection', (ws, req) => {
             broadcast({ type: 'unsend-message', messageId: data.messageId }, null, msgRoom);
           }
           break;
-
-        case 'car-crash-score':
-          // Handle car crash game score submission
-          if (data.score && typeof data.score === 'number') {
-            const user = users.get(username);
-            if (!user) break;
-
-            // Only process scores from users in the rest room
-            if (user.room !== REST_ROOM) break;
-
-            // Store the score
-            const currentHighScore = carCrashScores.get(username) || 0;
-            if (data.score > currentHighScore) {
-              carCrashScores.set(username, data.score);
-
-              // Award coins for high scores
-              user.coins += CAR_CRASH_COIN_REWARD;
-
-              // Notify user of new high score and coins
-              ws.send(JSON.stringify({
-                type: 'car-crash-highscore',
-                score: data.score,
-                coins: CAR_CRASH_COIN_REWARD,
-                message: `New high score! You earned ${CAR_CRASH_COIN_REWARD} coins!`
-              }));
-
-              // Update user's coin balance
-              ws.send(JSON.stringify({
-                type: 'coin-update',
-                coins: user.coins,
-                username
-              }));
-
-              // Check for milestones
-              checkMilestones(username, user.coins);
-
-              // Broadcast high score to rest room
-              broadcast({
-                type: 'car-crash-leaderboard-update',
-                username,
-                score: data.score
-              }, null, REST_ROOM);
-            }
-          }
-          break;
-
-        case 'request-car-crash-leaderboard':
-          // Send car crash game leaderboard to requester
-          const leaderboard = Array.from(carCrashScores.entries())
-            .map(([user, score]) => ({ username: user, score }))
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 10); // Top 10 scores
-
-          ws.send(JSON.stringify({
-            type: 'car-crash-leaderboard',
-            leaderboard
-          }));
-          break;
       }
     } catch (err) {
       console.error('Error processing message:', err);
     }
   });
-
+  
   // Clean up on connection close
   ws.on('close', () => {
     const user = users.get(username);
@@ -449,38 +370,15 @@ wss.on('connection', (ws, req) => {
       const roomUsers = rooms.get(user.room);
       if (roomUsers) {
         const otherUser = roomUsers.find(u => u !== username);
-        if (otherUser) {
-          // Check if other user is still connected
-          const otherUserData = users.get(otherUser);
-          if (otherUserData) {
-            // Move the other user to the rest room if they're now alone
-            otherUserData.room = REST_ROOM;
-            // Notify the other user they've been moved to the rest room
-            if (otherUserData.ws.readyState === WebSocket.OPEN) {
-              otherUserData.ws.send(JSON.stringify({
-                type: 'moved-to-rest-room',
-                message: 'Your chat partner has left. You have been moved to the Rest Room where you can play the Car Crash Game!'
-              }));
-              // Send rest room UI configuration
-              otherUserData.ws.send(JSON.stringify({
-                type: 'rest-room-ui',
-                theme: {
-                  headerColor: '#4a148c', // Deep purple for rest room
-                  backgroundColor: '#f3e5f5',
-                  textColor: '#4a148c',
-                  buttonColor: '#7b1fa2'
-                }
-              }));
-            }
-          }
-        }
+        // Do NOT return other user to public; keep them in the private room
+        // Room stays alive for reconnection
       }
       // Do not delete the room or permanent match
     }
     users.delete(username);
-    broadcast({
-      type: 'user-left',
-      username
+    broadcast({ 
+      type: 'user-left', 
+      username 
     });
     updateUserList();
   });
