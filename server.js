@@ -13,6 +13,8 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 
 // User data storage
+// The frontend now sends curated, trending Indian topics for 2025 at the top of each list (movies, songs, interests)
+// Matching logic remains the same, but the lists are more relevant for Indian users in 2025
 const users = new Map(); // username -> { ws, coins, profile, room }
 const messages = []; // Store all messages for unsend feature
 const roomMessages = new Map(); // roomId -> [messages]
@@ -31,6 +33,9 @@ const MILESTONES = [
   { threshold: 20, message: "Getting popular!", coins: 10 },
   { threshold: 50, message: "Chat superstar!", coins: 20 }
 ];
+
+// Permanent match storage: username -> { match: username, room: roomId }
+const permanentMatches = new Map();
 
 // Broadcast to all clients
 function broadcast(data, excludeUsername = null, room = 'public') {
@@ -92,6 +97,12 @@ wss.on('connection', (ws, req) => {
   let userProfile = null;
   let assignedRoom = 'public';
 
+  // Check if user has a permanent match
+  if (permanentMatches.has(username)) {
+    const matchInfo = permanentMatches.get(username);
+    assignedRoom = matchInfo.room;
+  }
+
   // Store profile if received before join
   ws.on('message', (message) => {
     try {
@@ -128,11 +139,40 @@ wss.on('connection', (ws, req) => {
             ws.close();
             return;
           }
+          // If user has a permanent match, restore room and skip matching
+          if (permanentMatches.has(username)) {
+            assignedRoom = permanentMatches.get(username).room;
+            // Register new user
+            users.set(username, {
+              ws,
+              coins: INITIAL_COINS,
+              milestonesReached: [],
+              profile: userProfile,
+              room: assignedRoom
+            });
+            // Send initial coin balance
+            ws.send(JSON.stringify({
+              type: 'coin-update',
+              coins: INITIAL_COINS,
+              username: username
+            }));
+            // Notify user of match
+            const matchUser = permanentMatches.get(username).match;
+            ws.send(JSON.stringify({ type: 'matched', room: assignedRoom, with: matchUser }));
+            // Send chat history for the room
+            if (roomMessages.has(assignedRoom)) {
+              ws.send(JSON.stringify({ type: 'chat-history', room: assignedRoom, messages: roomMessages.get(assignedRoom) }));
+            }
+            updateUserList();
+            return;
+          }
           // Matching logic
           let matchedRoom = null;
           if (userProfile) {
             for (const [otherUsername, otherUser] of users.entries()) {
               if (!otherUser.profile || otherUser.room !== 'public') continue;
+              // Prevent matching if either user has a permanent match
+              if (permanentMatches.has(username) || permanentMatches.has(otherUsername)) continue;
               // Require city match
               if (userProfile.city !== otherUser.profile.city) continue;
               // Check if this user matches other's expectations and vice versa
@@ -144,13 +184,18 @@ wss.on('connection', (ws, req) => {
               const reverseInterestsMatch = otherUser.profile.expectedInterests.every(i => userProfile.interests.includes(i));
               const reverseMoviesMatch = otherUser.profile.expectedMovies.every(m => userProfile.movies.includes(m));
               const reverseSongsMatch = otherUser.profile.expectedSongs.every(s => userProfile.songs.includes(s));
+              // Only match if both users are not already in a private room
               if (qualitiesMatch && interestsMatch && moviesMatch && songsMatch && reverseQualitiesMatch && reverseInterestsMatch && reverseMoviesMatch && reverseSongsMatch) {
-                // Create private room
+                // Double-check: only 2 users per room
+                if (otherUser.room !== 'public') continue;
                 matchedRoom = `room_${username}_${otherUsername}_${Date.now()}`;
                 rooms.set(matchedRoom, [username, otherUsername]);
                 // Assign both users to the room
                 otherUser.room = matchedRoom;
                 assignedRoom = matchedRoom;
+                // Store permanent match for both users
+                permanentMatches.set(username, { match: otherUsername, room: matchedRoom });
+                permanentMatches.set(otherUsername, { match: username, room: matchedRoom });
                 // Notify both users
                 if (otherUser.ws.readyState === WebSocket.OPEN) {
                   otherUser.ws.send(JSON.stringify({ type: 'matched', room: matchedRoom, with: username }));
@@ -347,6 +392,17 @@ wss.on('connection', (ws, req) => {
   
   // Clean up on connection close
   ws.on('close', () => {
+    const user = users.get(username);
+    if (user && user.room && user.room !== 'public') {
+      // Remove the user from the room
+      const roomUsers = rooms.get(user.room);
+      if (roomUsers) {
+        const otherUser = roomUsers.find(u => u !== username);
+        // Do NOT return other user to public; keep them in the private room
+        // Room stays alive for reconnection
+      }
+      // Do not delete the room or permanent match
+    }
     users.delete(username);
     broadcast({ 
       type: 'user-left', 
