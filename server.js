@@ -13,7 +13,10 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 
 // User data storage
-const users = new Map(); // username -> { ws, coins }
+const users = new Map(); // username -> { ws, coins, profile, room }
+const messages = []; // Store all messages for unsend feature
+const roomMessages = new Map(); // roomId -> [messages]
+const rooms = new Map(); // roomId -> [usernames]
 const stickers = {
   happy: '😊',
   sad: '😢',
@@ -30,10 +33,10 @@ const MILESTONES = [
 ];
 
 // Broadcast to all clients
-function broadcast(data, excludeUsername = null) {
+function broadcast(data, excludeUsername = null, room = 'public') {
   const message = JSON.stringify(data);
   users.forEach((user, username) => {
-    if (username !== excludeUsername && user.ws.readyState === WebSocket.OPEN) {
+    if (username !== excludeUsername && user.ws.readyState === WebSocket.OPEN && user.room === room) {
       user.ws.send(message);
     }
   });
@@ -86,51 +89,115 @@ function checkMilestones(username, newCoinCount) {
 wss.on('connection', (ws, req) => {
   const parameters = url.parse(req.url, true);
   let username = parameters.query.username;
-  
-  // Generate random username if not provided
-  if (!username) {
-    username = `User${Math.floor(Math.random() * 1000)}`;
-  }
-  
-  // Check if username is already taken
-  if (users.has(username)) {
-    ws.send(JSON.stringify({ 
-      type: 'error', 
-      message: 'Username already taken. Please choose another.' 
-    }));
-    ws.close();
-    return;
-  }
-  
-  // Register new user
-  users.set(username, { 
-    ws, 
-    coins: INITIAL_COINS,
-    milestonesReached: []
-  });
-  
-  // Send initial coin balance
-  ws.send(JSON.stringify({
-    type: 'coin-update',
-    coins: INITIAL_COINS,
-    username: username
-  }));
-  
-  // Notify all users about new connection
-  broadcast({ 
-    type: 'user-joined', 
-    username 
-  });
-  
-  // Send updated user list
-  updateUserList();
-  
-  // Message handler
+  let userProfile = null;
+  let assignedRoom = 'public';
+
+  // Store profile if received before join
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
+      if (data.type === 'profile') {
+        userProfile = {
+          city: (data.city || '').trim().toLowerCase(),
+          qualities: (data.qualities || []).map(s => s.trim().toLowerCase()),
+          interests: (data.interests || []).map(s => s.trim().toLowerCase()),
+          movies: (data.movies || []).map(s => s.trim().toLowerCase()),
+          songs: (data.songs || []).map(s => s.trim().toLowerCase()),
+          expectedQualities: (data.expectedQualities || []).map(s => s.trim().toLowerCase()),
+          expectedInterests: (data.expectedInterests || []).map(s => s.trim().toLowerCase()),
+          expectedMovies: (data.expectedMovies || []).map(s => s.trim().toLowerCase()),
+          expectedSongs: (data.expectedSongs || []).map(s => s.trim().toLowerCase()),
+        };
+        return;
+      }
       
       switch (data.type) {
+        case 'join':
+          // Generate random username if not provided
+          if (!data.username) {
+            username = `User${Math.floor(Math.random() * 1000)}`;
+          } else {
+            username = data.username;
+          }
+          // Check if username is already taken
+          if (users.has(username)) {
+            ws.send(JSON.stringify({ 
+              type: 'error', 
+              message: 'Username already taken. Please choose another.' 
+            }));
+            ws.close();
+            return;
+          }
+          // Matching logic
+          let matchedRoom = null;
+          if (userProfile) {
+            for (const [otherUsername, otherUser] of users.entries()) {
+              if (!otherUser.profile || otherUser.room !== 'public') continue;
+              // Require city match
+              if (userProfile.city !== otherUser.profile.city) continue;
+              // Check if this user matches other's expectations and vice versa
+              const qualitiesMatch = userProfile.expectedQualities.every(q => otherUser.profile.qualities.includes(q));
+              const interestsMatch = userProfile.expectedInterests.every(i => otherUser.profile.interests.includes(i));
+              const moviesMatch = userProfile.expectedMovies.every(m => otherUser.profile.movies.includes(m));
+              const songsMatch = userProfile.expectedSongs.every(s => otherUser.profile.songs.includes(s));
+              const reverseQualitiesMatch = otherUser.profile.expectedQualities.every(q => userProfile.qualities.includes(q));
+              const reverseInterestsMatch = otherUser.profile.expectedInterests.every(i => userProfile.interests.includes(i));
+              const reverseMoviesMatch = otherUser.profile.expectedMovies.every(m => userProfile.movies.includes(m));
+              const reverseSongsMatch = otherUser.profile.expectedSongs.every(s => userProfile.songs.includes(s));
+              if (qualitiesMatch && interestsMatch && moviesMatch && songsMatch && reverseQualitiesMatch && reverseInterestsMatch && reverseMoviesMatch && reverseSongsMatch) {
+                // Create private room
+                matchedRoom = `room_${username}_${otherUsername}_${Date.now()}`;
+                rooms.set(matchedRoom, [username, otherUsername]);
+                // Assign both users to the room
+                otherUser.room = matchedRoom;
+                assignedRoom = matchedRoom;
+                // Notify both users
+                if (otherUser.ws.readyState === WebSocket.OPEN) {
+                  otherUser.ws.send(JSON.stringify({ type: 'matched', room: matchedRoom, with: username }));
+                }
+                ws.send(JSON.stringify({ type: 'matched', room: matchedRoom, with: otherUsername }));
+                break;
+              }
+            }
+          }
+          // Register new user
+          users.set(username, { 
+            ws, 
+            coins: INITIAL_COINS,
+            milestonesReached: [],
+            profile: userProfile,
+            room: assignedRoom
+          });
+          // Send initial coin balance
+          ws.send(JSON.stringify({
+            type: 'coin-update',
+            coins: INITIAL_COINS,
+            username: username
+          }));
+          // Notify all users about new connection
+          broadcast({ 
+            type: 'user-joined', 
+            username 
+          });
+          // Send updated user list
+          updateUserList();
+          // After registering new user (in join), send chat history for their room
+          const userRoom = assignedRoom;
+          if (roomMessages.has(userRoom)) {
+            ws.send(JSON.stringify({ type: 'chat-history', room: userRoom, messages: roomMessages.get(userRoom) }));
+          }
+          // When matched, also send chat history for the new room
+          if (matchedRoom) {
+            if (roomMessages.has(matchedRoom)) {
+              ws.send(JSON.stringify({ type: 'chat-history', room: matchedRoom, messages: roomMessages.get(matchedRoom) }));
+              const otherUser = users.get(matchedRoom.split('_')[2]);
+              if (otherUser && otherUser.ws.readyState === WebSocket.OPEN) {
+                otherUser.ws.send(JSON.stringify({ type: 'chat-history', room: matchedRoom, messages: roomMessages.get(matchedRoom) }));
+              }
+            }
+          }
+          break;
+          
         case 'text-message':
           // Broadcast text message to all users
           const textMsg = {
@@ -138,9 +205,13 @@ wss.on('connection', (ws, req) => {
             username,
             message: data.message,
             timestamp: Date.now(),
-            id: uuid.v4()
+            id: uuid.v4(),
+            room: data.room || assignedRoom
           };
-          broadcast(textMsg);
+          messages.push({ ...textMsg }); // Store message with room info
+          if (!roomMessages.has(textMsg.room)) roomMessages.set(textMsg.room, []);
+          roomMessages.get(textMsg.room).push({ ...textMsg });
+          broadcast(textMsg, null, textMsg.room);
           break;
           
         case 'sticker-message':
@@ -254,6 +325,18 @@ wss.on('connection', (ws, req) => {
               messageId: data.messageId,
               seenBy: data.seenBy
             }, username);
+          }
+          break;
+
+        case 'unsend-message':
+          // Unsend message logic
+          if (!data.messageId) break;
+          // Find the message
+          const msgIndex = messages.findIndex(m => m.id === data.messageId);
+          if (msgIndex !== -1 && messages[msgIndex].username === username) {
+            const msgRoom = messages[msgIndex].room || 'public';
+            messages.splice(msgIndex, 1); // Remove from storage
+            broadcast({ type: 'unsend-message', messageId: data.messageId }, null, msgRoom);
           }
           break;
       }
