@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Car Crash Game</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Arial', sans-serif;
+      background: #222;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    
+    .game-container {
+      width: 100%;
+      max-width: 800px;
+      text-align: center;
+    }
+    
+    .game-title {
+      font-size: 2.5rem;
+      margin-bottom: 20px;
+      color: #ff6f91;
+      text-shadow: 0 0 10px rgba(255, 111, 145, 0.5);
+    }
+    
+    .game-board {
+      width: 400px;
+      height: 600px;
+      background: linear-gradient(to bottom, #333, #666);
+      position: relative;
+      overflow: hidden;
+      border-radius: 10px;
+      box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+      margin: 0 auto;
+    }
+    
+    .car {
+      width: 60px;
+      height: 100px;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 100"><rect x="10" y="10" width="40" height="80" rx="10" fill="red"/><rect x="15" y="20" width="30" height="20" rx="5" fill="lightblue"/><rect x="15" y="60" width="30" height="20" rx="5" fill="lightblue"/><rect x="5" y="30" width="10" height="40" rx="3" fill="red"/><rect x="45" y="30" width="10" height="40" rx="3" fill="red"/></svg>');
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+    }
+    
+    .obstacle {
+      width: 50px;
+      height: 50px;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50"><rect x="5" y="5" width="40" height="40" rx="5" fill="brown"/><rect x="10" y="10" width="30" height="30" rx="3" fill="darkbrown"/></svg>');
+      position: absolute;
+      top: -50px;
+      z-index: 5;
+    }
+    
+    .road-line {
+      width: 10px;
+      height: 40px;
+      background-color: white;
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1;
+    }
+    
+    .game-controls {
+      margin-top: 20px;
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+    }
+    
+    .game-button {
+      padding: 10px 20px;
+      background: linear-gradient(to bottom, #ff6f91, #e91e63);
+      color: white;
+      border: none;
+      border-radius: 5px;
+      font-size: 16px;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      transition: all 0.2s;
+    }
+    
+    .game-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+    }
+    
+    .game-button:active {
+      transform: translateY(1px);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+    
+    .game-stats {
+      color: white;
+      font-size: 18px;
+      margin: 20px 0;
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+    }
+    
+    .game-over {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      display: none;
+      z-index: 20;
+    }
+    
+    .game-over h2 {
+      color: #ff6f91;
+      margin-bottom: 10px;
+    }
+    
+    .game-over p {
+      margin-bottom: 15px;
+    }
+    
+    .game-over button {
+      background: #ff6f91;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    
+    .game-prompt {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      z-index: 20;
+      max-width: 300px;
+    }
+    
+    .game-prompt h3 {
+      color: #ff6f91;
+      margin-bottom: 10px;
+    }
+    
+    .game-prompt p {
+      margin-bottom: 15px;
+    }
+    
+    .game-prompt button {
+      background: #ff6f91;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 0 5px;
+    }
+    
+    .crash-animation {
+      position: absolute;
+      width: 100px;
+      height: 100px;
+      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="orange"/><circle cx="50" cy="50" r="30" fill="yellow"/><path d="M30,30 L70,70 M30,70 L70,30" stroke="red" stroke-width="8"/></svg>');
+      z-index: 15;
+      animation: explosion 0.5s forwards;
+      display: none;
+    }
+    
+    @keyframes explosion {
+      0% { transform: scale(0.1); opacity: 0; }
+      50% { transform: scale(1.5); opacity: 1; }
+      100% { transform: scale(2); opacity: 0; }
+    }
+    
+    .leaderboard {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      padding: 15px;
+      margin-top: 20px;
+      max-width: 400px;
+      width: 100%;
+    }
+    
+    .leaderboard h3 {
+      color: #ff6f91;
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    
+    .leaderboard-list {
+      list-style: none;
+      padding: 0;
+    }
+    
+    .leaderboard-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 10px;
+      color: white;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    .leaderboard-item:last-child {
+      border-bottom: none;
+    }
+    
+    .leaderboard-rank {
+      font-weight: bold;
+      color: #ff6f91;
+    }
+    
+    .return-button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background: #4a148c;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="game-container">
+    <h1 class="game-title">Car Crash Game</h1>
+    
+    <div class="game-board" id="gameBoard">
+      <div class="car" id="car"></div>
+      <div class="crash-animation" id="crashAnimation"></div>
+      
+      <div class="game-prompt" id="gamePrompt">
+        <h3>Warning!</h3>
+        <p>Your crush is in the car! Are you sure you want to crash it?</p>
+        <button id="startGameYes">Yes, Let's Crash!</button>
+        <button id="startGameNo">No, Cancel</button>
+      </div>
+      
+      <div class="game-over" id="gameOver">
+        <h2>Game Over!</h2>
+        <p>Your score: <span id="finalScore">0</span></p>
+        <p>The faster you crash, the higher your score!</p>
+        <button id="playAgain">Play Again</button>
+        <button id="returnToChat">Return to Chat</button>
+      </div>
+    </div>
+    
+    <div class="game-stats">
+      <div>Score: <span id="scoreDisplay">0</span></div>
+      <div>Speed: <span id="speedDisplay">0</span> mph</div>
+    </div>
+    
+    <div class="game-controls">
+      <button id="leftButton" class="game-button">← Left</button>
+      <button id="rightButton" class="game-button">Right →</button>
+    </div>
+    
+    <div class="leaderboard">
+      <h3>Top Crashers</h3>
+      <ul id="leaderboardList" class="leaderboard-list">
+        <!-- Leaderboard items will be added here -->
+      </ul>
+    </div>
+    
+    <button id="returnButton" class="return-button">Return to Chat</button>
+  </div>
+
+  <script>
+    // Game variables
+    let gameActive = false;
+    let gameSpeed = 5;
+    let score = 0;
+    let carPosition = 50; // percentage
+    let obstacles = [];
+    let roadLines = [];
+    let animationFrameId;
+    let lastObstacleTime = 0;
+    let lastRoadLineTime = 0;
+    let crashTimeout;
+    let username = '';
+    let serverUrl = '';
+    
+    // DOM elements
+    const gameBoard = document.getElementById('gameBoard');
+    const car = document.getElementById('car');
+    const crashAnimation = document.getElementById('crashAnimation');
+    const gamePrompt = document.getElementById('gamePrompt');
+    const gameOver = document.getElementById('gameOver');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const speedDisplay = document.getElementById('speedDisplay');
+    const finalScore = document.getElementById('finalScore');
+    const leaderboardList = document.getElementById('leaderboardList');
+    const leftButton = document.getElementById('leftButton');
+    const rightButton = document.getElementById('rightButton');
+    const startGameYes = document.getElementById('startGameYes');
+    const startGameNo = document.getElementById('startGameNo');
+    const playAgain = document.getElementById('playAgain');
+    const returnToChat = document.getElementById('returnToChat');
+    const returnButton = document.getElementById('returnButton');
+    
+    // Get URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    username = urlParams.get('username') || 'Player';
+    serverUrl = urlParams.get('server') || 'wss://google-8j5x.onrender.com';
+    
+    // WebSocket connection
+    let socket;
+    
+    // Initialize the game
+    function init() {
+      // Connect to WebSocket server
+      connectWebSocket();
+      
+      // Set up event listeners
+      startGameYes.addEventListener('click', () => {
+        gamePrompt.style.display = 'none';
+        startGame();
+      });
+      
+      startGameNo.addEventListener('click', () => {
+        window.close();
+      });
+      
+      playAgain.addEventListener('click', () => {
+        gameOver.style.display = 'none';
+        startGame();
+      });
+      
+      returnToChat.addEventListener('click', () => {
+        window.close();
+      });
+      
+      returnButton.addEventListener('click', () => {
+        window.close();
+      });
+      
+      // Game controls
+      leftButton.addEventListener('mousedown', () => moveCarLeft());
+      rightButton.addEventListener('mousedown', () => moveCarRight());
+      
+      // Keyboard controls
+      document.addEventListener('keydown', (e) => {
+        if (!gameActive) return;
+        
+        if (e.key === 'ArrowLeft') {
+          moveCarLeft();
+        } else if (e.key === 'ArrowRight') {
+          moveCarRight();
+        }
+      });
+      
+      // Request leaderboard
+      setTimeout(() => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'request-car-crash-leaderboard' }));
+        }
+      }, 1000);
+    }
+    
+    // Connect to WebSocket server
+    function connectWebSocket() {
+      socket = new WebSocket(serverUrl);
+      
+      socket.addEventListener('open', () => {
+        console.log('Connected to server');
+        
+        // Send authentication message
+        socket.send(JSON.stringify({
+          type: 'game-auth',
+          username: username
+        }));
+      });
+      
+      socket.addEventListener('message', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.type === 'car-crash-leaderboard') {
+            updateLeaderboard(data.leaderboard);
+          } else if (data.type === 'car-crash-highscore') {
+            showHighScoreMessage(data.score, data.coins);
+          }
+        } catch (err) {
+          console.error('Error processing message:', err);
+        }
+      });
+      
+      socket.addEventListener('close', () => {
+        console.log('Disconnected from server');
+      });
+      
+      socket.addEventListener('error', (error) => {
+        console.error('WebSocket error:', error);
+      });
+    }
+    
+    function startGame() {
+      // Reset game state
+      gameActive = true;
+      gameSpeed = 5;
+      score = 0;
+      carPosition = 50;
+      obstacles = [];
+      roadLines = [];
+      
+      // Clear existing elements
+      const existingObstacles = document.querySelectorAll('.obstacle');
+      existingObstacles.forEach(obs => obs.remove());
+      
+      const existingRoadLines = document.querySelectorAll('.road-line');
+      existingRoadLines.forEach(line => line.remove());
+      
+      // Reset car position
+      car.style.left = `${carPosition}%`;
+      
+      // Reset displays
+      scoreDisplay.textContent = '0';
+      speedDisplay.textContent = '0';
+      
+      // Start game loop
+      lastObstacleTime = Date.now();
+      lastRoadLineTime = Date.now();
+      gameLoop();
+      
+      // Schedule crash after random time (3-10 seconds)
+      const crashTime = Math.floor(Math.random() * 7000) + 3000;
+      crashTimeout = setTimeout(() => {
+        if (gameActive) {
+          crashCar();
+        }
+      }, crashTime);
+    }
+    
+    function gameLoop() {
+      if (!gameActive) return;
+      
+      // Update game state
+      updateObstacles();
+      updateRoadLines();
+      checkCollisions();
+      updateScore();
+      
+      // Increase speed over time
+      gameSpeed += 0.01;
+      
+      // Update speed display (convert to mph for display)
+      speedDisplay.textContent = Math.floor(gameSpeed * 10);
+      
+      // Continue game loop
+      animationFrameId = requestAnimationFrame(gameLoop);
+    }
+    
+    function updateObstacles() {
+      const now = Date.now();
+      
+      // Add new obstacle
+      if (now - lastObstacleTime > 1000) {
+        const obstacle = document.createElement('div');
+        obstacle.className = 'obstacle';
+        const obstaclePosition = Math.random() * 80 + 10; // 10% to 90%
+        obstacle.style.left = `${obstaclePosition}%`;
+        gameBoard.appendChild(obstacle);
+        obstacles.push({ element: obstacle, position: obstaclePosition });
+        lastObstacleTime = now;
+      }
+      
+      // Move obstacles
+      obstacles.forEach((obstacle, index) => {
+        const obstacleElement = obstacle.element;
+        const top = parseFloat(obstacleElement.style.top || '-50px');
+        const newTop = top + gameSpeed;
+        
+        if (newTop > gameBoard.clientHeight) {
+          // Remove obstacle if it's off screen
+          obstacleElement.remove();
+          obstacles.splice(index, 1);
+        } else {
+          obstacleElement.style.top = `${newTop}px`;
+        }
+      });
+    }
+    
+    function updateRoadLines() {
+      const now = Date.now();
+      
+      // Add new road line
+      if (now - lastRoadLineTime > 300) {
+        const roadLine = document.createElement('div');
+        roadLine.className = 'road-line';
+        roadLine.style.top = '-40px';
+        gameBoard.appendChild(roadLine);
+        roadLines.push({ element: roadLine });
+        lastRoadLineTime = now;
+      }
+      
+      // Move road lines
+      roadLines.forEach((line, index) => {
+        const lineElement = line.element;
+        const top = parseFloat(lineElement.style.top || '-40px');
+        const newTop = top + gameSpeed;
+        
+        if (newTop > gameBoard.clientHeight) {
+          // Remove line if it's off screen
+          lineElement.remove();
+          roadLines.splice(index, 1);
+        } else {
+          lineElement.style.top = `${newTop}px`;
+        }
+      });
+    }
+    
+    function checkCollisions() {
+      // Get car position and dimensions
+      const carRect = car.getBoundingClientRect();
+      
+      // Check collision with obstacles
+      obstacles.forEach(obstacle => {
+        const obstacleRect = obstacle.element.getBoundingClientRect();
+        
+        if (
+          carRect.left < obstacleRect.right &&
+          carRect.right > obstacleRect.left &&
+          carRect.top < obstacleRect.bottom &&
+          carRect.bottom > obstacleRect.top
+        ) {
+          // Collision detected
+          crashCar();
+        }
+      });
+      
+      // Check if car is off the road (outside game board boundaries)
+      const boardRect = gameBoard.getBoundingClientRect();
+      if (
+        carRect.left < boardRect.left ||
+        carRect.right > boardRect.right
+      ) {
+        crashCar();
+      }
+    }
+    
+    function updateScore() {
+      score += gameSpeed / 10;
+      scoreDisplay.textContent = Math.floor(score);
+    }
+    
+    function moveCarLeft() {
+      if (!gameActive) return;
+      carPosition = Math.max(10, carPosition - 5);
+      car.style.left = `${carPosition}%`;
+    }
+    
+    function moveCarRight() {
+      if (!gameActive) return;
+      carPosition = Math.min(90, carPosition + 5);
+      car.style.left = `${carPosition}%`;
+    }
+    
+    function crashCar() {
+      if (!gameActive) return;
+      
+      gameActive = false;
+      clearTimeout(crashTimeout);
+      
+      // Show crash animation
+      crashAnimation.style.display = 'block';
+      crashAnimation.style.left = car.style.left;
+      crashAnimation.style.top = car.style.top || `${gameBoard.clientHeight - 120}px`;
+      
+      // Hide car
+      car.style.display = 'none';
+      
+      // Calculate final score - faster crashes get higher scores
+      const finalScoreValue = Math.floor(score * (gameSpeed / 5));
+      finalScore.textContent = finalScoreValue;
+      
+      // Show game over screen after animation
+      setTimeout(() => {
+        crashAnimation.style.display = 'none';
+        gameOver.style.display = 'block';
+        car.style.display = 'block';
+        
+        // Send score to server
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({
+            type: 'car-crash-score',
+            score: finalScoreValue
+          }));
+        }
+      }, 1000);
+    }
+    
+    function updateLeaderboard(leaderboard) {
+      leaderboardList.innerHTML = '';
+      
+      if (!leaderboard || leaderboard.length === 0) {
+        const emptyItem = document.createElement('li');
+        emptyItem.className = 'leaderboard-item';
+        emptyItem.textContent = 'No scores yet. Be the first!';
+        leaderboardList.appendChild(emptyItem);
+        return;
+      }
+      
+      leaderboard.forEach((entry, index) => {
+        const item = document.createElement('li');
+        item.className = 'leaderboard-item';
+        
+        const rank = document.createElement('span');
+        rank.className = 'leaderboard-rank';
+        rank.textContent = `#${index + 1}`;
+        
+        const user = document.createElement('span');
+        user.textContent = entry.username;
+        
+        const score = document.createElement('span');
+        score.textContent = entry.score;
+        
+        item.appendChild(rank);
+        item.appendChild(user);
+        item.appendChild(score);
+        
+        leaderboardList.appendChild(item);
+      });
+    }
+    
+    function showHighScoreMessage(score, coins) {
+      const message = document.createElement('div');
+      message.style.position = 'fixed';
+      message.style.top = '20%';
+      message.style.left = '50%';
+      message.style.transform = 'translate(-50%, 0)';
+      message.style.background = '#4a148c';
+      message.style.color = 'white';
+      message.style.padding = '20px';
+      message.style.borderRadius = '10px';
+      message.style.boxShadow = '0 0 20px rgba(255, 111, 145, 0.5)';
+      message.style.zIndex = '1000';
+      message.style.textAlign = 'center';
+      message.innerHTML = `<h3>New High Score: ${score}!</h3><p>You earned ${coins} coins!</p>`;
+      
+      document.body.appendChild(message);
+      
+      setTimeout(() => {
+        message.style.opacity = '0';
+        message.style.transition = 'opacity 0.5s';
+        setTimeout(() => {
+          document.body.removeChild(message);
+        }, 500);
+      }, 3000);
+    }
+    
+    // Initialize the game when the page loads
+    window.addEventListener('load', init);
+  </script>
+</body>
+</html>
