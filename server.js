@@ -128,6 +128,15 @@ wss.on('connection', (ws, req) => {
       }
 
       switch (data.type) {
+        case 'game-auth':
+          // Handle authentication from game.html
+          if (data.username) {
+            username = data.username;
+            // Don't create a new user, just use this connection for game messages
+            return;
+          }
+          break;
+          
         case 'join':
           // Generate random username if not provided
           if (!data.username) {
