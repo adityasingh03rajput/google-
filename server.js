@@ -1,262 +1,280 @@
-require('dotenv').config();
-const http = require('http');
-const path = require('path');
-const express = require('express');
-const { PythonShell } = require('python-shell');
 const WebSocket = require('ws');
+const http = require('http');
+const url = require('url');
+const uuid = require('uuid'); // For generating unique message IDs
 
-const app = express();
-const server = http.createServer(app);
-
-// Serve static files from the 'public' directory
-app.use(express.static(path.join(__dirname, 'public')));
-
-// API endpoint to check server status
-app.get('/api/status', (req, res) => {
-  res.json({ status: 'Server is running', users: Object.keys(users).length });
+// Create HTTP server
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('WebSocket chat server is running');
 });
 
-// WebSocket server
+// Create WebSocket server
 const wss = new WebSocket.Server({ server });
 
-// Store connected users and their stats
-const users = {};
-const userStats = {};
-// Track seen status for each message
-const seenStatus = {};
-// Track all messages for edit/delete
-const allMessages = {};
-
-// Milestone and coin settings
-const MILESTONES = {
-  messages: [10, 50, 100, 200],
-  stickers: [10, 25, 50],
-  time: [600, 1800, 3600] // seconds: 10min, 30min, 1hr
-};
-const MILESTONE_REWARDS = {
-  messages: 15,
-  stickers: 10,
-  time: 25
+// User data storage
+const users = new Map(); // username -> { ws, coins }
+const stickers = {
+  happy: '😊',
+  sad: '😢',
+  thumbsup: '👍',
+  heart: '❤️',
+  laugh: '😂'
 };
 const STICKER_COST = 3;
+const INITIAL_COINS = 10;
+const MILESTONES = [
+  { threshold: 5, message: "First steps!", coins: 5 },
+  { threshold: 20, message: "Getting popular!", coins: 10 },
+  { threshold: 50, message: "Chat superstar!", coins: 20 }
+];
 
-function broadcast(type, data) {
-  const message = JSON.stringify({ type, ...data });
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
+// Broadcast to all clients
+function broadcast(data, excludeUsername = null) {
+  const message = JSON.stringify(data);
+  users.forEach((user, username) => {
+    if (username !== excludeUsername && user.ws.readyState === WebSocket.OPEN) {
+      user.ws.send(message);
     }
   });
 }
 
-function sendUserList() {
-  const userList = Object.values(users);
-  broadcast('user-list', { users: userList });
+// Send user list to all clients
+function updateUserList() {
+  const userList = Array.from(users.keys());
+  broadcast({ type: 'user-list', users: userList });
 }
 
-function sendCoinUpdate(username, ws) {
-  if (userStats[username]) {
-    const msg = JSON.stringify({ type: 'coin-update', username, coins: userStats[username].coins });
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(msg);
-    } else {
-      // Fallback to find the user's socket and send
-      for (const client of wss.clients) {
-        if (client.username === username && client.readyState === WebSocket.OPEN) {
-          client.send(msg);
-          break;
-        }
+// Check for milestones when coins change
+function checkMilestones(username, newCoinCount) {
+  const user = users.get(username);
+  if (!user) return;
+
+  for (const milestone of MILESTONES) {
+    if (newCoinCount >= milestone.threshold && 
+        (!user.milestonesReached || !user.milestonesReached.includes(milestone.threshold))) {
+      // Mark this milestone as reached
+      if (!user.milestonesReached) user.milestonesReached = [];
+      user.milestonesReached.push(milestone.threshold);
+      
+      // Award bonus coins
+      user.coins += milestone.coins;
+      
+      // Notify user
+      const ws = user.ws;
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'milestone',
+          milestone: milestone.message,
+          coins: milestone.coins,
+          username: username
+        }));
+        
+        // Also send coin update
+        ws.send(JSON.stringify({
+          type: 'coin-update',
+          coins: user.coins,
+          username: username
+        }));
       }
+      break; // Only notify for the highest reached milestone
     }
   }
 }
 
-function checkMilestones(username, type) {
-  const stats = userStats[username];
-  if (!stats) return;
-  const milestones = MILESTONES[type] || [];
-  const reward = MILESTONE_REWARDS[type] || 0;
+// WebSocket connection handler
+wss.on('connection', (ws, req) => {
+  const parameters = url.parse(req.url, true);
+  let username = parameters.query.username;
   
-  milestones.forEach(milestone => {
-    const key = `${type}_milestone_${milestone}`;
-    let statValue;
-    if (type === 'time') {
-      statValue = Math.floor((Date.now() - stats.joinTime) / 1000);
-    } else {
-      statValue = stats[type];
-    }
-    
-    if (statValue >= milestone && !stats[key]) {
-      stats[key] = true;
-      stats.coins += reward;
-      let milestoneText = '';
-      if (type === 'time') {
-        milestoneText = `Chatted for ${Math.floor(milestone / 60)} minutes!`;
-      } else {
-        milestoneText = `Sent ${milestone} ${type}!`;
-      }
-      broadcast('milestone', {
-        username,
-        milestone: milestoneText,
-        coins: stats.coins,
-        type,
-        value: milestone
-      });
-      sendCoinUpdate(username);
-    }
+  // Generate random username if not provided
+  if (!username) {
+    username = `User${Math.floor(Math.random() * 1000)}`;
+  }
+  
+  // Check if username is already taken
+  if (users.has(username)) {
+    ws.send(JSON.stringify({ 
+      type: 'error', 
+      message: 'Username already taken. Please choose another.' 
+    }));
+    ws.close();
+    return;
+  }
+  
+  // Register new user
+  users.set(username, { 
+    ws, 
+    coins: INITIAL_COINS,
+    milestonesReached: []
   });
-}
-
-// Time milestone checker (runs every 10s)
-setInterval(() => {
-  Object.keys(userStats).forEach(username => {
-    checkMilestones(username, 'time');
+  
+  // Send initial coin balance
+  ws.send(JSON.stringify({
+    type: 'coin-update',
+    coins: INITIAL_COINS,
+    username: username
+  }));
+  
+  // Notify all users about new connection
+  broadcast({ 
+    type: 'user-joined', 
+    username 
   });
-}, 10000);
-
-wss.on('connection', (ws) => {
-  ws.on('message', (msg) => {
-    let data;
+  
+  // Send updated user list
+  updateUserList();
+  
+  // Message handler
+  ws.on('message', (message) => {
     try {
-      data = JSON.parse(msg);
-    } catch (err) {
-      console.error('Invalid JSON received:', msg);
-      return;
-    }
-    
-    const { username } = ws;
-
-    switch (data.type) {
-      case 'join':
-        ws.username = data.username;
-        users[ws._socket.remotePort] = ws.username;
-        if (!userStats[ws.username]) {
-          userStats[ws.username] = {
-            messages: 0,
-            stickers: 0,
-            coins: 50, // Initial 50 coins
-            joinTime: Date.now()
-          };
-        }
-        broadcast('user-joined', { username: ws.username });
-        sendUserList();
-        sendCoinUpdate(ws.username, ws);
-        break;
+      const data = JSON.parse(message);
       
-      case 'text-message':
-        if (username && userStats[username]) {
-          userStats[username].messages += 1;
-          const msgObj = {
+      switch (data.type) {
+        case 'text-message':
+          // Broadcast text message to all users
+          const textMsg = {
+            type: 'text-message',
             username,
             message: data.message,
-            timestamp: new Date().toISOString(),
-            id: Date.now() + Math.random().toString(36).slice(2)
+            timestamp: Date.now(),
+            id: uuid.v4()
           };
-          seenStatus[msgObj.id] = [];
-          allMessages[msgObj.id] = msgObj;
-          broadcast('text-message', msgObj);
-          checkMilestones(username, 'messages');
-          sendCoinUpdate(username, ws);
-        }
-        break;
-        
-      case 'sticker-message':
-        if (username && userStats[username]) {
-          if (userStats[username].coins < STICKER_COST) {
-            ws.send(JSON.stringify({ type: 'sticker-error', message: `Not enough coins! (${STICKER_COST} required)` }));
+          broadcast(textMsg);
+          break;
+          
+        case 'sticker-message':
+          // Handle sticker message (with coin cost)
+          const user = users.get(username);
+          if (user.coins >= STICKER_COST) {
+            user.coins -= STICKER_COST;
+            
+            // Send coin update to sender
+            ws.send(JSON.stringify({
+              type: 'coin-update',
+              coins: user.coins,
+              username
+            }));
+            
+            // Broadcast sticker to all users
+            broadcast({
+              type: 'sticker-message',
+              username,
+              stickerCode: stickers[data.stickerId] || '❓',
+              timestamp: Date.now()
+            });
+            
+            // Check for milestones
+            checkMilestones(username, user.coins);
+          } else {
+            ws.send(JSON.stringify({
+              type: 'sticker-error',
+              message: `Not enough coins! Stickers cost ${STICKER_COST} coins.`
+            }));
+          }
+          break;
+          
+        case 'coin-transfer':
+          // Handle coin transfer between users
+          const fromUser = users.get(username);
+          const toUser = users.get(data.to);
+          
+          if (!toUser) {
+            ws.send(JSON.stringify({
+              type: 'coin-transfer-error',
+              message: `User "${data.to}" not found.`
+            }));
             return;
           }
-          userStats[username].coins -= STICKER_COST;
-          userStats[username].stickers += 1;
-          // Note: Python sticker processing is still here. You can remove it if not needed.
-          PythonShell.run(
-            path.join(__dirname, 'sticker_processor.py'),
-            { args: [data.stickerId, username] },
-            (err, results) => {
-              const stickerData = err ? { stickerCode: '❓' } : JSON.parse(results[0]);
-              broadcast('sticker-message', {
-                ...stickerData,
-                username,
-                stickerId: data.stickerId,
-                timestamp: new Date().toISOString()
-              });
-              checkMilestones(username, 'stickers');
-              sendCoinUpdate(username, ws);
-            }
-          );
-        }
-        break;
-        
-      case 'seen-message':
-        if (username && data.messageId && seenStatus[data.messageId] && !seenStatus[data.messageId].includes(username)) {
-          seenStatus[data.messageId].push(username);
-          broadcast('message-seen', { messageId: data.messageId, seenBy: username });
-        }
-        break;
-        
-      case 'coin-transfer':
-        const fromUser = username;
-        const toUser = data.to;
-        const amount = parseInt(data.amount, 10);
-        if (!userStats[fromUser] || !userStats[toUser]) {
-          ws.send(JSON.stringify({ type: 'coin-transfer-error', message: 'User not found.' }));
-        } else if (fromUser === toUser) {
-          ws.send(JSON.stringify({ type: 'coin-transfer-error', message: 'Cannot send to yourself.' }));
-        } else if (isNaN(amount) || amount <= 0) {
-          ws.send(JSON.stringify({ type: 'coin-transfer-error', message: 'Invalid amount.' }));
-        } else if (userStats[fromUser].coins < amount) {
-          ws.send(JSON.stringify({ type: 'coin-transfer-error', message: 'Not enough coins.' }));
-        } else {
-          userStats[fromUser].coins -= amount;
-          userStats[toUser].coins += amount;
-          ws.send(JSON.stringify({ type: 'coin-transfer-success', message: `Sent ${amount} coins to ${toUser}.` }));
-          sendCoinUpdate(fromUser, ws);
-          // Notify recipient
-          for (const client of wss.clients) {
-            if (client.username === toUser && client.readyState === WebSocket.OPEN) {
-              client.send(JSON.stringify({ type: 'coin-transfer-received', message: `Received ${amount} coins from ${fromUser}.` }));
-              sendCoinUpdate(toUser, client);
-            }
+          
+          if (data.amount <= 0) {
+            ws.send(JSON.stringify({
+              type: 'coin-transfer-error',
+              message: 'Amount must be positive.'
+            }));
+            return;
           }
-        }
-        break;
-        
-      case 'request-user-list':
-        sendUserList();
-        break;
-        
-      case 'request-coin-balance':
-        sendCoinUpdate(username, ws);
-        break;
-
-      case 'edit-message':
-        // { type: 'edit-message', messageId, newText }
-        if (data.messageId && allMessages[data.messageId] && allMessages[data.messageId].username === username) {
-          allMessages[data.messageId].message = data.newText;
-          broadcast('message-edited', { messageId: data.messageId, newText: data.newText });
-        }
-        break;
-      case 'delete-message':
-        // { type: 'delete-message', messageId }
-        if (data.messageId && allMessages[data.messageId] && allMessages[data.messageId].username === username) {
-          delete allMessages[data.messageId];
-          broadcast('message-deleted', { messageId: data.messageId });
-        }
-        break;
+          
+          if (fromUser.coins < data.amount) {
+            ws.send(JSON.stringify({
+              type: 'coin-transfer-error',
+              message: 'Not enough coins for this transfer.'
+            }));
+            return;
+          }
+          
+          // Perform transfer
+          fromUser.coins -= data.amount;
+          toUser.coins += data.amount;
+          
+          // Update sender
+          ws.send(JSON.stringify({
+            type: 'coin-update',
+            coins: fromUser.coins,
+            username
+          }));
+          
+          ws.send(JSON.stringify({
+            type: 'coin-transfer-success',
+            message: `Sent ${data.amount} coins to ${data.to}.`
+          }));
+          
+          // Update recipient if they're online
+          if (toUser.ws.readyState === WebSocket.OPEN) {
+            toUser.ws.send(JSON.stringify({
+              type: 'coin-update',
+              coins: toUser.coins,
+              username: data.to
+            }));
+            
+            toUser.ws.send(JSON.stringify({
+              type: 'coin-transfer-received',
+              message: `Received ${data.amount} coins from ${username}.`
+            }));
+          }
+          
+          // Check milestones for both users
+          checkMilestones(username, fromUser.coins);
+          checkMilestones(data.to, toUser.coins);
+          break;
+          
+        case 'request-user-list':
+          // Send current user list to requester
+          ws.send(JSON.stringify({
+            type: 'user-list',
+            users: Array.from(users.keys())
+          }));
+          break;
+          
+        case 'seen-message':
+          // Handle message seen notification
+          if (data.messageId && users.has(data.seenBy)) {
+            broadcast({
+              type: 'message-seen',
+              messageId: data.messageId,
+              seenBy: data.seenBy
+            }, username);
+          }
+          break;
+      }
+    } catch (err) {
+      console.error('Error processing message:', err);
     }
   });
-
+  
+  // Clean up on connection close
   ws.on('close', () => {
-    if (ws.username) {
-      delete users[ws._socket.remotePort];
-      // Note: userStats are kept for now, so returning users keep their stats.
-      broadcast('user-left', { username: ws.username });
-      sendUserList();
-    }
+    users.delete(username);
+    broadcast({ 
+      type: 'user-left', 
+      username 
+    });
+    updateUserList();
   });
 });
 
-const PORT = process.env.PORT || 3000;
+// Start server
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
