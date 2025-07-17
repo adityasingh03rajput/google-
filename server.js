@@ -435,8 +435,31 @@ wss.on('connection', (ws, req) => {
       const roomUsers = rooms.get(user.room);
       if (roomUsers) {
         const otherUser = roomUsers.find(u => u !== username);
-        // Do NOT return other user to public; keep them in the private room
-        // Room stays alive for reconnection
+        if (otherUser) {
+          // Check if other user is still connected
+          const otherUserData = users.get(otherUser);
+          if (otherUserData) {
+            // Move the other user to the rest room if they're now alone
+            otherUserData.room = REST_ROOM;
+            // Notify the other user they've been moved to the rest room
+            if (otherUserData.ws.readyState === WebSocket.OPEN) {
+              otherUserData.ws.send(JSON.stringify({
+                type: 'moved-to-rest-room',
+                message: 'Your chat partner has left. You have been moved to the Rest Room where you can play the Car Crash Game!'
+              }));
+              // Send rest room UI configuration
+              otherUserData.ws.send(JSON.stringify({
+                type: 'rest-room-ui',
+                theme: {
+                  headerColor: '#4a148c', // Deep purple for rest room
+                  backgroundColor: '#f3e5f5',
+                  textColor: '#4a148c',
+                  buttonColor: '#7b1fa2'
+                }
+              }));
+            }
+          }
+        }
       }
       // Do not delete the room or permanent match
     }
