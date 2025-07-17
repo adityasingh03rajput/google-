@@ -225,6 +225,7 @@ wss.on('connection', (ws, req) => {
                 users.get(username).room = matchedRoom;
                 permanentMatches.set(username, { match: otherUsername, room: matchedRoom });
                 permanentMatches.set(otherUsername, { match: username, room: matchedRoom });
+                assignedRoom = matchedRoom; // Ensure assignedRoom is updated for this session
                 if (otherUser.ws.readyState === WebSocket.OPEN) {
                   otherUser.ws.send(JSON.stringify({ type: 'matched', room: matchedRoom, with: username }));
                 }
