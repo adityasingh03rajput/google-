@@ -1,391 +1,145 @@
+// Simple WebSocket chat server for safe.html
 const WebSocket = require('ws');
-const http = require('http');
-const url = require('url');
-const uuid = require('uuid'); // For generating unique message IDs
+const { v4: uuidv4 } = require('uuid');
 
-// Create HTTP server
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('WebSocket chat server is running');
-});
+const wss = new WebSocket.Server({ port: 3000 });
 
-// Create WebSocket server
-const wss = new WebSocket.Server({ server });
-
-// User data storage
-// The frontend now sends curated, trending Indian topics for 2025 at the top of each list (movies, songs, interests)
-// Matching logic remains the same, but the lists are more relevant for Indian users in 2025
-const users = new Map(); // username -> { ws, coins, profile, room }
-const messages = []; // Store all messages for unsend feature
-const roomMessages = new Map(); // roomId -> [messages]
-const rooms = new Map(); // roomId -> [usernames]
+const users = new Map(); // username -> { ws, coins }
+const messages = []; // { id, username, message, timestamp, type, stickerCode }
+const INITIAL_COINS = 10;
+const STICKER_COST = 3;
 const stickers = {
   happy: '😊',
   sad: '😢',
   thumbsup: '👍',
   heart: '❤️',
-  laugh: '😂'
+  laugh: '😂',
 };
-const STICKER_COST = 3;
-const INITIAL_COINS = 10;
-const MILESTONES = [
-  { threshold: 5, message: "First steps!", coins: 5 },
-  { threshold: 20, message: "Getting popular!", coins: 10 },
-  { threshold: 50, message: "Chat superstar!", coins: 20 }
-];
 
-// Permanent match storage: username -> { match: username, room: roomId }
-const permanentMatches = new Map();
-const REST_ROOM = 'rest_room';
-
-// Broadcast to all clients
-function broadcast(data, excludeUsername = null, room = REST_ROOM) {
-  const message = JSON.stringify(data);
-  users.forEach((user, username) => {
-    if (username !== excludeUsername && user.ws.readyState === WebSocket.OPEN && user.room === room) {
-      user.ws.send(message);
+function broadcast(data, exclude = null) {
+  const msg = JSON.stringify(data);
+  for (const [username, user] of users.entries()) {
+    if (user.ws.readyState === WebSocket.OPEN && username !== exclude) {
+      user.ws.send(msg);
     }
-  });
+  }
 }
 
-// Send user list to all clients
 function updateUserList() {
-  const userList = Array.from(users.keys());
-  broadcast({ type: 'user-list', users: userList });
+  broadcast({ type: 'user-list', users: Array.from(users.keys()) });
 }
 
-// Check for milestones when coins change
-function checkMilestones(username, newCoinCount) {
-  const user = users.get(username);
-  if (!user) return;
+wss.on('connection', (ws) => {
+  let username = null;
 
-  for (const milestone of MILESTONES) {
-    if (newCoinCount >= milestone.threshold && 
-        (!user.milestonesReached || !user.milestonesReached.includes(milestone.threshold))) {
-      // Mark this milestone as reached
-      if (!user.milestonesReached) user.milestonesReached = [];
-      user.milestonesReached.push(milestone.threshold);
-      
-      // Award bonus coins
-      user.coins += milestone.coins;
-      
-      // Notify user
-      const ws = user.ws;
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'milestone',
-          milestone: milestone.message,
-          coins: milestone.coins,
-          username: username
-        }));
-        
-        // Also send coin update
-        ws.send(JSON.stringify({
-          type: 'coin-update',
-          coins: user.coins,
-          username: username
-        }));
-      }
-      break; // Only notify for the highest reached milestone
-    }
-  }
-}
-
-// WebSocket connection handler
-wss.on('connection', (ws, req) => {
-  const parameters = url.parse(req.url, true);
-  let username = parameters.query.username;
-  let userProfile = null;
-  let assignedRoom = REST_ROOM;
-
-  // Check if user has a permanent match
-  if (permanentMatches.has(username)) {
-    const matchInfo = permanentMatches.get(username);
-    assignedRoom = matchInfo.room;
-  }
-
-  // Store profile if received before join
-  ws.on('message', (message) => {
+  ws.on('message', (msg) => {
+    let data;
     try {
-      const data = JSON.parse(message);
-      if (data.type === 'profile') {
-        userProfile = {
-          city: (data.city || '').trim().toLowerCase(),
-          qualities: (data.qualities || []).map(s => s.trim().toLowerCase()),
-          interests: (data.interests || []).map(s => s.trim().toLowerCase()),
-          movies: (data.movies || []).map(s => s.trim().toLowerCase()),
-          songs: (data.songs || []).map(s => s.trim().toLowerCase()),
-          expectedQualities: (data.expectedQualities || []).map(s => s.trim().toLowerCase()),
-          expectedInterests: (data.expectedInterests || []).map(s => s.trim().toLowerCase()),
-          expectedMovies: (data.expectedMovies || []).map(s => s.trim().toLowerCase()),
-          expectedSongs: (data.expectedSongs || []).map(s => s.trim().toLowerCase()),
+      data = JSON.parse(msg);
+    } catch {
+      return;
+    }
+
+    switch (data.type) {
+      case 'join': {
+        if (!data.username || users.has(data.username)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid or duplicate username.' }));
+          ws.close();
+          return;
+        }
+        username = data.username;
+        users.set(username, { ws, coins: INITIAL_COINS });
+        ws.send(JSON.stringify({ type: 'coin-update', coins: INITIAL_COINS, username }));
+        updateUserList();
+        // Send chat history
+        ws.send(JSON.stringify({ type: 'chat-history', messages }));
+        broadcast({ type: 'user-joined', username }, username);
+        break;
+      }
+      case 'text-message': {
+        if (!username) return;
+        const message = {
+          type: 'text-message',
+          id: uuidv4(),
+          username,
+          message: data.message,
+          timestamp: Date.now(),
         };
-        return;
+        messages.push(message);
+        broadcast(message);
+        break;
       }
-      
-      switch (data.type) {
-        case 'join':
-          // Generate random username if not provided
-          if (!data.username) {
-            username = `User${Math.floor(Math.random() * 1000)}`;
-          } else {
-            username = data.username;
-          }
-          // Check if username is already taken
-          if (users.has(username)) {
-            ws.send(JSON.stringify({ 
-              type: 'error', 
-              message: 'Username already taken. Please choose another.' 
-            }));
-            ws.close();
-            return;
-          }
-          // If user has a permanent match, restore room and skip matching
-          if (permanentMatches.has(username)) {
-            assignedRoom = permanentMatches.get(username).room;
-            // Register new user
-            users.set(username, {
-              ws,
-              coins: INITIAL_COINS,
-              milestonesReached: [],
-              profile: userProfile,
-              room: assignedRoom
-            });
-            // Send initial coin balance
-            ws.send(JSON.stringify({
-              type: 'coin-update',
-              coins: INITIAL_COINS,
-              username: username
-            }));
-            // Notify user of match
-            const matchUser = permanentMatches.get(username).match;
-            ws.send(JSON.stringify({ type: 'matched', room: assignedRoom, with: matchUser }));
-            // Send chat history for the room
-            if (roomMessages.has(assignedRoom)) {
-              ws.send(JSON.stringify({ type: 'chat-history', room: assignedRoom, messages: roomMessages.get(assignedRoom) }));
-            }
-            updateUserList();
-            return;
-          }
-          // Not matched: assign to rest room
-          assignedRoom = REST_ROOM;
-          users.set(username, {
-            ws,
-            coins: INITIAL_COINS,
-            milestonesReached: [],
-            profile: userProfile,
-            room: assignedRoom
-          });
-          ws.send(JSON.stringify({
-            type: 'coin-update',
-            coins: INITIAL_COINS,
-            username: username
-          }));
-          ws.send(JSON.stringify({ type: 'rest-room' }));
-          updateUserList();
-          // Try to match
-          let matchedRoom = null;
-          if (userProfile) {
-            for (const [otherUsername, otherUser] of users.entries()) {
-              if (!otherUser.profile || otherUser.room !== REST_ROOM) continue;
-              if (permanentMatches.has(username) || permanentMatches.has(otherUsername)) continue;
-              if (userProfile.city !== otherUser.profile.city) continue;
-              const qualitiesMatch = userProfile.expectedQualities.every(q => otherUser.profile.qualities.includes(q));
-              const interestsMatch = userProfile.expectedInterests.every(i => otherUser.profile.interests.includes(i));
-              const moviesMatch = userProfile.expectedMovies.every(m => otherUser.profile.movies.includes(m));
-              const songsMatch = userProfile.expectedSongs.every(s => otherUser.profile.songs.includes(s));
-              const reverseQualitiesMatch = otherUser.profile.expectedQualities.every(q => userProfile.qualities.includes(q));
-              const reverseInterestsMatch = otherUser.profile.expectedInterests.every(i => userProfile.interests.includes(i));
-              const reverseMoviesMatch = otherUser.profile.expectedMovies.every(m => userProfile.movies.includes(m));
-              const reverseSongsMatch = otherUser.profile.expectedSongs.every(s => userProfile.songs.includes(s));
-              if (qualitiesMatch && interestsMatch && moviesMatch && songsMatch && reverseQualitiesMatch && reverseInterestsMatch && reverseMoviesMatch && reverseSongsMatch) {
-                matchedRoom = `room_${username}_${otherUsername}_${Date.now()}`;
-                rooms.set(matchedRoom, [username, otherUsername]);
-                otherUser.room = matchedRoom;
-                users.get(username).room = matchedRoom;
-                permanentMatches.set(username, { match: otherUsername, room: matchedRoom });
-                permanentMatches.set(otherUsername, { match: username, room: matchedRoom });
-                if (otherUser.ws.readyState === WebSocket.OPEN) {
-                  otherUser.ws.send(JSON.stringify({ type: 'matched', room: matchedRoom, with: username }));
-                }
-                ws.send(JSON.stringify({ type: 'matched', room: matchedRoom, with: otherUsername }));
-                break;
-              }
-            }
-          }
-          break;
-          
-        case 'text-message':
-          // Broadcast text message to all users
-          const textMsg = {
-            type: 'text-message',
-            username,
-            message: data.message,
-            timestamp: Date.now(),
-            id: uuid.v4(),
-            room: data.room || assignedRoom
-          };
-          messages.push({ ...textMsg }); // Store message with room info
-          if (!roomMessages.has(textMsg.room)) roomMessages.set(textMsg.room, []);
-          roomMessages.get(textMsg.room).push({ ...textMsg });
-          broadcast(textMsg, null, textMsg.room);
-          break;
-          
-        case 'sticker-message':
-          // Handle sticker message (with coin cost)
-          const user = users.get(username);
-          if (user.coins >= STICKER_COST) {
-            user.coins -= STICKER_COST;
-            
-            // Send coin update to sender
-            ws.send(JSON.stringify({
-              type: 'coin-update',
-              coins: user.coins,
-              username
-            }));
-            
-            // Broadcast sticker to all users
-            broadcast({
-              type: 'sticker-message',
-              username,
-              stickerCode: stickers[data.stickerId] || '❓',
-              timestamp: Date.now()
-            });
-            
-            // Check for milestones
-            checkMilestones(username, user.coins);
-          } else {
-            ws.send(JSON.stringify({
-              type: 'sticker-error',
-              message: `Not enough coins! Stickers cost ${STICKER_COST} coins.`
-            }));
-          }
-          break;
-          
-        case 'coin-transfer':
-          // Handle coin transfer between users
-          const fromUser = users.get(username);
-          const toUser = users.get(data.to);
-          
-          if (!toUser) {
-            ws.send(JSON.stringify({
-              type: 'coin-transfer-error',
-              message: `User "${data.to}" not found.`
-            }));
-            return;
-          }
-          
-          if (data.amount <= 0) {
-            ws.send(JSON.stringify({
-              type: 'coin-transfer-error',
-              message: 'Amount must be positive.'
-            }));
-            return;
-          }
-          
-          if (fromUser.coins < data.amount) {
-            ws.send(JSON.stringify({
-              type: 'coin-transfer-error',
-              message: 'Not enough coins for this transfer.'
-            }));
-            return;
-          }
-          
-          // Perform transfer
-          fromUser.coins -= data.amount;
-          toUser.coins += data.amount;
-          
-          // Update sender
-          ws.send(JSON.stringify({
-            type: 'coin-update',
-            coins: fromUser.coins,
-            username
-          }));
-          
-          ws.send(JSON.stringify({
-            type: 'coin-transfer-success',
-            message: `Sent ${data.amount} coins to ${data.to}.`
-          }));
-          
-          // Update recipient if they're online
-          if (toUser.ws.readyState === WebSocket.OPEN) {
-            toUser.ws.send(JSON.stringify({
-              type: 'coin-update',
-              coins: toUser.coins,
-              username: data.to
-            }));
-            
-            toUser.ws.send(JSON.stringify({
-              type: 'coin-transfer-received',
-              message: `Received ${data.amount} coins from ${username}.`
-            }));
-          }
-          
-          // Check milestones for both users
-          checkMilestones(username, fromUser.coins);
-          checkMilestones(data.to, toUser.coins);
-          break;
-          
-        case 'request-user-list':
-          // Send current user list to requester
-          ws.send(JSON.stringify({
-            type: 'user-list',
-            users: Array.from(users.keys())
-          }));
-          break;
-          
-        case 'seen-message':
-          // Handle message seen notification
-          if (data.messageId && users.has(data.seenBy)) {
-            broadcast({
-              type: 'message-seen',
-              messageId: data.messageId,
-              seenBy: data.seenBy
-            }, username);
-          }
-          break;
-
-        case 'unsend-message':
-          // Unsend message logic
-          if (!data.messageId) break;
-          // Find the message
-          const msgIndex = messages.findIndex(m => m.id === data.messageId);
-          if (msgIndex !== -1 && messages[msgIndex].username === username) {
-            const msgRoom = messages[msgIndex].room || 'public';
-            messages.splice(msgIndex, 1); // Remove from storage
-            broadcast({ type: 'unsend-message', messageId: data.messageId }, null, msgRoom);
-          }
-          break;
+      case 'sticker-message': {
+        if (!username) return;
+        const user = users.get(username);
+        if (user.coins < STICKER_COST) {
+          ws.send(JSON.stringify({ type: 'sticker-error', message: `Not enough coins! Stickers cost ${STICKER_COST} coins.` }));
+          return;
+        }
+        user.coins -= STICKER_COST;
+        ws.send(JSON.stringify({ type: 'coin-update', coins: user.coins, username }));
+        const stickerCode = stickers[data.stickerId] || '❓';
+        const stickerMsg = {
+          type: 'sticker-message',
+          id: uuidv4(),
+          username,
+          stickerCode,
+          timestamp: Date.now(),
+        };
+        messages.push(stickerMsg);
+        broadcast(stickerMsg);
+        break;
       }
-    } catch (err) {
-      console.error('Error processing message:', err);
+      case 'coin-transfer': {
+        if (!username) return;
+        const fromUser = users.get(username);
+        const toUser = users.get(data.to);
+        const amount = parseInt(data.amount, 10);
+        if (!toUser) {
+          ws.send(JSON.stringify({ type: 'coin-transfer-error', message: `User "${data.to}" not found.` }));
+          return;
+        }
+        if (isNaN(amount) || amount <= 0) {
+          ws.send(JSON.stringify({ type: 'coin-transfer-error', message: 'Amount must be positive.' }));
+          return;
+        }
+        if (fromUser.coins < amount) {
+          ws.send(JSON.stringify({ type: 'coin-transfer-error', message: 'Not enough coins for this transfer.' }));
+          return;
+        }
+        fromUser.coins -= amount;
+        toUser.coins += amount;
+        ws.send(JSON.stringify({ type: 'coin-update', coins: fromUser.coins, username }));
+        ws.send(JSON.stringify({ type: 'coin-transfer-success', message: `Sent ${amount} coins to ${data.to}.` }));
+        if (toUser.ws.readyState === WebSocket.OPEN) {
+          toUser.ws.send(JSON.stringify({ type: 'coin-update', coins: toUser.coins, username: data.to }));
+          toUser.ws.send(JSON.stringify({ type: 'coin-transfer-received', message: `Received ${amount} coins from ${username}.` }));
+        }
+        break;
+      }
+      case 'unsend-message': {
+        if (!username) return;
+        const idx = messages.findIndex(m => m.id === data.messageId && m.username === username);
+        if (idx !== -1) {
+          messages.splice(idx, 1);
+          broadcast({ type: 'unsend-message', messageId: data.messageId });
+        }
+        break;
+      }
+      case 'request-user-list': {
+        updateUserList();
+        break;
+      }
     }
   });
-  
-  // Clean up on connection close
+
   ws.on('close', () => {
-    const user = users.get(username);
-    if (user && user.room && user.room !== REST_ROOM) {
-      // Remove the user from the room
-      const roomUsers = rooms.get(user.room);
-      if (roomUsers) {
-        const otherUser = roomUsers.find(u => u !== username);
-        // Do NOT return other user to public; keep them in the private room
-        // Room stays alive for reconnection
-      }
-      // Do not delete the room or permanent match
+    if (username && users.has(username)) {
+      users.delete(username);
+      broadcast({ type: 'user-left', username });
+      updateUserList();
     }
-    users.delete(username);
-    broadcast({ 
-      type: 'user-left', 
-      username 
-    });
-    updateUserList();
   });
 });
 
-// Start server
-const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+console.log('WebSocket chat server running on ws://localhost:3000');
