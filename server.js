@@ -202,7 +202,10 @@ wss.on('connection', (ws, req) => {
           // Try to match
           let matchedRoom = null;
           if (userProfile) {
+            let matched = false;
             for (const [otherUsername, otherUser] of users.entries()) {
+              if (matched) break;
+              if (otherUsername === username) continue; // Prevent matching with self
               if (!otherUser.profile || otherUser.room !== REST_ROOM) continue;
               if (permanentMatches.has(username) || permanentMatches.has(otherUsername)) continue;
               if (userProfile.city !== otherUser.profile.city) continue;
@@ -215,6 +218,7 @@ wss.on('connection', (ws, req) => {
               const reverseMoviesMatch = otherUser.profile.expectedMovies.every(m => userProfile.movies.includes(m));
               const reverseSongsMatch = otherUser.profile.expectedSongs.every(s => userProfile.songs.includes(s));
               if (qualitiesMatch && interestsMatch && moviesMatch && songsMatch && reverseQualitiesMatch && reverseInterestsMatch && reverseMoviesMatch && reverseSongsMatch) {
+                matched = true;
                 matchedRoom = `room_${username}_${otherUsername}_${Date.now()}`;
                 rooms.set(matchedRoom, [username, otherUsername]);
                 otherUser.room = matchedRoom;
